@@ -1,0 +1,195 @@
+services:
+  gateway:
+    depends_on:
+      auth:
+        condition: service_started
+      messaging:
+        condition: service_started
+      file: 
+        condition: service_started
+      audit:
+        condition: service_started
+    environment:
+      GATEWAY_PORT: ${GATEWAY_PORT}
+    ports:
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - type: bind
+        source: ./certs/ca/ca.crt
+        target: /app/certs/ca/ca.crt
+      - type: bind
+        source: ./certs/gateway
+        target: /app/certs/gateway
+      - type: bind
+        source: ./gateway
+        target: /app/gateway
+      - type: bind
+        source: ./secureChat.sh
+        target: /app/secureChat.sh
+    command: ["bash", "./secureChat.sh", "run", "gateway"]
+
+  auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      app-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: "app-db"
+      DB_PORT: ${DB_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_DATA}
+    volumes:
+      - type: bind
+        source: ./certs/ca/ca.crt
+        target: /app/certs/ca/ca.crt
+      - type: bind
+        source: ./certs/auth
+        target: /app/certs/auth
+      - type: bind
+        source: ./auth
+        target: /app/auth
+      - type: bind
+        source: ./secureChat.sh
+        target: /app/secureChat.sh
+      - type: volume
+        source: auth-keys
+        target: /app/auth-keys
+    command: ["bash", "./secureChat.sh", "run", "auth"]
+
+  messaging:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DB_HOST: "app-db"
+      DB_PORT: ${DB_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_DATA}
+    depends_on:
+      app-db:
+        condition : service_healthy
+    volumes:
+      - type: bind
+        source: ./certs/ca/ca.crt
+        target: /app/certs/ca/ca.crt
+      - type: bind
+        source: ./certs/messaging
+        target: /app/certs/messaging
+      - type: bind
+        source: ./messaging
+        target: /app/messaging
+      - type: bind
+        source: ./secureChat.sh
+        target: /app/secureChat.sh
+    command: ["bash", "./secureChat.sh", "run", "messaging"]
+    
+  file:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      app-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: "app-db"
+      DB_PORT: ${DB_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_DATA}
+    volumes:
+      - type: bind
+        source: ./certs/ca/ca.crt
+        target: /app/certs/ca/ca.crt
+      - type: bind
+        source: ./certs/file
+        target: /app/certs/file
+      - type: bind
+        source: ./file
+        target: /app/file
+      - type: bind
+        source: ./secureChat.sh
+        target: /app/secureChat.sh
+      - type: volume
+        source: file-storage
+        target: /app/file-storage
+    command: ["bash", "./secureChat.sh", "run", "file"]
+
+  audit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      audit-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: "audit-db"
+      DB_PORT: ${DB_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_AUDIT}
+    volumes:
+      - type: bind
+        source: ./certs/ca/ca.crt
+        target: /app/certs/ca/ca.crt
+      - type: bind
+        source: ./certs/audit
+        target: /app/certs/audit
+      - type: bind
+        source: ./audit
+        target: /app/audit
+      - type: bind
+        source: ./secureChat.sh
+        target: /app/secureChat.sh
+    command: ["bash", "./secureChat.sh", "run", "audit"]
+
+  app-db:
+    image: postgres:18.6-bookworm
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB_DATA}
+    volumes:
+      - type: volume
+        source: app-data
+        target: /var/lib/postgresql
+      - type: bind
+        source: ./app-db-init.sql
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  audit-db:
+    image: mongo:8.3.11-noble
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - type: volume
+        source: audit-data
+        target: /data/db
+      - type: bind
+        source: ./audit-db-init.js
+        target: /docker-entrypoint-initdb.d/mongo-init.js
+        read_only: true
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "${MONGO_INITDB_ROOT_USERNAME}", "-p", "${MONGO_INITDB_ROOT_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  app-data:
+  audit-data:
+  auth-keys:
+  file-storage:
