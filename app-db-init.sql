@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at timestamptz NOT NULL,
   revoked_at timestamptz,
 
-  CONSTRAINT fk_session_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  CONSTRAINT fk_session_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE conversations (
@@ -27,17 +27,18 @@ CREATE TABLE conversations (
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-  CONSTAINT fk_conversations_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
+  CONSTRAINT fk_conversations_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE conversation_participants (
-  id long SERIAL PRIMARY KEY,
   conversation_id uuid NOT NULL,
   user_id uuid NOT NULL,
   role varchar NOT NULL,
   joined_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-  CONSTRAINT fk_participant_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  PRIMARY KEY (conversation_id, user_id),
+
+  CONSTRAINT fk_participant_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_participant_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 
@@ -51,7 +52,7 @@ CREATE TABLE messages (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at timestamptz,
 
-  CONSTRAINT fk_message_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+  CONSTRAINT fk_message_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   CONSTRAINT fk_message_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -64,7 +65,7 @@ CREATE TABLE files (
   size_bytes bigint NOT NULL,
   checksum varchar NOT NULL,
   storage_ref varchar NOT NULL,
-  encryption_algorithm varchar NOT NULL DEFAULT 'AES-256-GCM', -- keep an authenticated mode;
+  encryption_algorithm varchar NOT NULL DEFAULT 'AES-256-GCM', -- keep an authenticated mode
   nonce varchar NOT NULL,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at timestamptz,
@@ -73,14 +74,14 @@ CREATE TABLE files (
 );
 
 CREATE TABLE message_attachments (
-  id long SERIAL PRIMARY KEY,
   message_id uuid NOT NULL,
   file_id uuid NOT NULL,
+
+  PRIMARY KEY (message_id, file_id),
   
-  CONSTRAINT fk_attachment_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+  CONSTRAINT fk_attachment_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
   CONSTRAINT fk_attachment_file FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 );
-
 
 -- Nice to have
 
@@ -88,70 +89,43 @@ CREATE TABLE message_delivery_receipts (
   message_id uuid NOT NULL,
   user_id uuid NOT NULL,
   delivered_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (message_id, user_id)
+
+  PRIMARY KEY (message_id, user_id),
+
+  CONSTRAINT fk_delivery_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+  CONSTRAINT fk_delivery_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE message_read_receipts (
   message_id uuid NOT NULL,
   user_id uuid NOT NULL,
   read_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (message_id, user_id)
+
+  PRIMARY KEY (message_id, user_id),
+
+  CONSTRAINT fk_read_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+  CONSTRAINT fk_read_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE presence (
   user_id uuid PRIMARY KEY,
   status varchar DEFAULT 'offline',
-  last_seen_at timestamptz
+  last_seen_at timestamptz,
+
+  CONSTRAINT fk_presence_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE INDEX ON messages (conversation_id, server_timestamp);
 
-CREATE INDEX ON files (user_id, conversation_id);
+CREATE INDEX ON idx_conversation_participants_user ON conversation_participants(user_id);
+CREATE INDEX ON idx_conversation_participants_conversation ON conversation_participants(converstion_id);
 
--- Foreign keys, with ON DELETE actions
-
-
-
-
-
-
-ALTER TABLE messages ADD FOREIGN KEY (conversation_id)
-  REFERENCES conversations (id) ON DELETE CASCADE;
-
-ALTER TABLE messages ADD FOREIGN KEY (sender_id)
-  REFERENCES users (id) ON DELETE SET NULL;
-
-ALTER TABLE message_attachments ADD FOREIGN KEY (message_id)
-  REFERENCES messages (id) ON DELETE CASCADE;
-
-ALTER TABLE message_attachments ADD FOREIGN KEY (file_id) -- was missing entirely
-  REFERENCES files (id) ON DELETE CASCADE;
-
-ALTER TABLE files ADD FOREIGN KEY (user_id)
-  REFERENCES users (id) ON DELETE SET NULL;
-
-ALTER TABLE files ADD FOREIGN KEY (conversation_id)
-  REFERENCES conversations (id) ON DELETE SET NULL;
-
-ALTER TABLE message_delivery_receipts ADD FOREIGN KEY (message_id)
-  REFERENCES messages (id) ON DELETE CASCADE;
-
-ALTER TABLE message_delivery_receipts ADD FOREIGN KEY (user_id)
-  REFERENCES users (id) ON DELETE CASCADE;
-
-ALTER TABLE message_read_receipts ADD FOREIGN KEY (message_id)
-  REFERENCES messages (id) ON DELETE CASCADE;
-
-ALTER TABLE message_read_receipts ADD FOREIGN KEY (user_id)
-  REFERENCES users (id) ON DELETE CASCADE;
-
-ALTER TABLE presence ADD FOREIGN KEY (user_id)
-  REFERENCES users (id) ON DELETE CASCADE;
+CREATE INDEX ON idx_message_attachments_file ON message_attachments(file_id);
+CREATE INDEX ON idx_message_attachments_message ON message_attachments(message_id);
 
 -- Optional: auto-maintain updated_at on UPDATE (Postgres does not do this by default —
 -- the DEFAULT above only fires on INSERT).
-
-CREATE OR REPLACE FUNCTION set_updated_at()
+CREATE IF NOT EXISTS FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = CURRENT_TIMESTAMP;
