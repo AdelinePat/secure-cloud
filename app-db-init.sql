@@ -115,17 +115,17 @@ CREATE TABLE presence (
   CONSTRAINT fk_presence_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX ON messages (conversation_id, server_timestamp);
+CREATE INDEX idx_message_conversation ON messages (conversation_id, server_timestamp);
 
-CREATE INDEX ON idx_conversation_participants_user ON conversation_participants(user_id);
-CREATE INDEX ON idx_conversation_participants_conversation ON conversation_participants(converstion_id);
+CREATE INDEX idx_conversation_participants_user ON conversation_participants(user_id);
+CREATE INDEX idx_conversation_participants_conversation ON conversation_participants(conversation_id);
 
-CREATE INDEX ON idx_message_attachments_file ON message_attachments(file_id);
-CREATE INDEX ON idx_message_attachments_message ON message_attachments(message_id);
+CREATE INDEX idx_message_attachments_file ON message_attachments(file_id);
+CREATE INDEX idx_message_attachments_message ON message_attachments(message_id);
 
 -- Optional: auto-maintain updated_at on UPDATE (Postgres does not do this by default —
 -- the DEFAULT above only fires on INSERT).
-CREATE IF NOT EXISTS FUNCTION set_updated_at()
+CREATE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = CURRENT_TIMESTAMP;

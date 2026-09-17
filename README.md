@@ -47,3 +47,8 @@ Execute command inside container with
 ```bash
 docker compose exec app-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f queries.sql'
 ```
+
+## Change end of line from windows to linux
+```
+dos2unix <fileName>
+```
