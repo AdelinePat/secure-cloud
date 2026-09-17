@@ -133,7 +133,7 @@ services:
       DB_PORT: ${DB_PORT}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB_AUDIT}
+      POSTGRES_DB: ${POSTGRES_DB_DATA}
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
@@ -176,6 +176,9 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_DB_AUDIT: ${MONGO_DB_AUDIT}
+      MONGO_USER: ${MONGO_USER}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
     volumes:
       - type: volume
         source: audit-data
@@ -184,6 +187,9 @@ services:
         source: ./audit-db-init.js
         target: /docker-entrypoint-initdb.d/mongo-init.js
         read_only: true
+      - type: bind
+        source: ./queries.js
+        target: /queries.js
     healthcheck:
       test: ["CMD", "mongosh", "-u", "${MONGO_INITDB_ROOT_USERNAME}", "-p", "${MONGO_INITDB_ROOT_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
       interval: 10s

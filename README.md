@@ -48,6 +48,32 @@ Execute command inside container with
 docker compose exec app-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f queries.sql'
 ```
 
+### Test mongodb queries
+Get inside app-db container
+
+```bash
+docker compose exec audit-db sh -c 'mongosh \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
+  --authenticationDatabase "$MONGO_DB_AUDIT" \
+  "$MONGO_DB_AUDIT"'
+```
+
+Or create a `queries.js` at root project
+```bash
+touch queries.js
+```
+Execute command inside container with
+```bash
+docker compose exec audit-db sh -c 'mongosh \
+  --username "$MONGO_USER" \
+  --password "$MONGO_PASSWORD" \
+  --authenticationDatabase "$MONGO_DB_AUDIT" \
+  "$MONGO_DB_AUDIT" \
+  /queries.js'
+```
+
+
 ## Change end of line from windows to linux
 ```
 dos2unix <fileName>
