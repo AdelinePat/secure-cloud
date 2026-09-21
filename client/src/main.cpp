@@ -54,18 +54,19 @@ int main(int argc, char* argv[]) {
       : std::cout
             << "Bob's receiving key does not match Alice's transmitting key\n";
 
-  using Nonce = std::array<unsigned char, crypto_secretbox_NONCEBYTES>;
-  using Ciphertext = std::vector<unsigned char>;
-
-  struct encrypted_message {
-    Nonce n;
-    Ciphertext c;
-  };
-
   std::string message = "Hello Bob!";
 
   crypto::EncryptedMessage encryptedMessage =
       crypto::MessageCrypto::encrypt(message, aliceSessionKeys.tx);
+
+  // Corrupt the ciphertext to demonstrate decryption failure
+  // encryptedMessage.ciphertext[0] ^= 0x01;
+
+  std::string decryptedMessage =
+      crypto::MessageCrypto::decrypt(encryptedMessage, bobSessionKeys.rx);
+
+  std::cout << "Original message: " << message << '\n';
+  std::cout << "Decrypted message: " << decryptedMessage << '\n';
 
   QApplication app(argc, argv);
 
