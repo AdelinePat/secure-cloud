@@ -75,3 +75,4 @@ Testing/
 queries.sql
 queries.js
 .qtcreator/
+.vscode/
