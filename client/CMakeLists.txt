@@ -55,6 +55,7 @@ qt_standard_project_setup()
 qt_add_executable(client
     src/main.cpp
     src/crypto/KeyManager.cpp
+    src/crypto/MessageCrypto.cpp
 )
 
 target_include_directories(client
