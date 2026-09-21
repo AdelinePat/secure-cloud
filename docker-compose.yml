@@ -89,7 +89,7 @@ services:
         source: ./secureChat.sh
         target: /app/secureChat.sh
     command: ["bash", "./secureChat.sh", "run", "messaging"]
-    
+
   file:
     build:
       context: .

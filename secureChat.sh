@@ -113,6 +113,7 @@ cmd_run() {
             title "Running: $target"
             "$bin"
             ;;
+
         *)
             failure "'run' requires a specific target: auth, audit, file, messaging, or gateway"
             exit 1
@@ -144,4 +145,26 @@ cmd_rebuild() {
 }
 
 # ==================== ENTRY POINT ====================
-# unchanged
+
+case "${1:-}" in
+    build)
+        cmd_build "${2:-all}"
+        ;;
+    test)
+        cmd_test "${2:-all}"
+        ;;
+    run)
+        cmd_run "${2:-}"
+        ;;
+    clean)
+        cmd_clean "${2:-all}"
+        ;;
+    rebuild)
+        cmd_rebuild "${2:-all}"
+        ;;
+    *)
+        failure "Unknown command: ${1:-}"
+        echo "Usage: $0 {build|test|run|clean|rebuild} [service]"
+        exit 1
+        ;;
+esac
