@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   email varchar UNIQUE NOT NULL,
   password_hash varchar NOT NULL,
   public_key varchar NOT NULL,
+  key_algorithm varchar NOT NULL DEFAULT 'X25519',
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -23,7 +24,7 @@ CREATE TABLE conversations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid, -- nullable: SET NULL on delete,
   type varchar NOT NULL,
-  name varchar NOT NULL,
+  name varchar,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -48,6 +49,7 @@ CREATE TABLE messages (
   user_id uuid, -- nullable: SET NULL on delete,
   ciphertext bytea NOT NULL,
   nonce varchar NOT NULL, -- required for AEAD decryption
+  encryption_version smallint NOT NULL DEFAULT 1,
   server_timestamp timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at timestamptz,
@@ -70,7 +72,9 @@ CREATE TABLE files (
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at timestamptz,
 
-  CONSTRAINT fk_file_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  CONSTRAINT fk_file_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT chk_files_status
+  CHECK (status IN ('UPLOADING', 'AVAILABLE', 'FAILED', 'DELETED'))
 );
 
 CREATE TABLE message_attachments (
@@ -122,6 +126,9 @@ CREATE INDEX idx_conversation_participants_conversation ON conversation_particip
 
 CREATE INDEX idx_message_attachments_file ON message_attachments(file_id);
 CREATE INDEX idx_message_attachments_message ON message_attachments(message_id);
+
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE UNIQUE INDEX idx_sessions_refresh_token_hash ON sessions(refresh_token_hash);
 
 -- Optional: auto-maintain updated_at on UPDATE (Postgres does not do this by default —
 -- the DEFAULT above only fires on INSERT).

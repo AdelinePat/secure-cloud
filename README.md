@@ -132,7 +132,7 @@ Qt **6.4.2 minimum**, **6.10.2** was used for development.
 
 Then add these to your `PATH`:
 
-```
+```bash
 C:\Qt\Tools\QtCreator\bin
 C:\Qt\6.x.x\mingw_64\bin
 C:\Qt\Tools\CMake_64\bin
