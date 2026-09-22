@@ -60,13 +60,17 @@ int main(int argc, char* argv[]) {
       crypto::MessageCrypto::encrypt(message, aliceSessionKeys.tx);
 
   // Corrupt the ciphertext to demonstrate decryption failure
-  // encryptedMessage.ciphertext[0] ^= 0x01;
+  //  encryptedMessage.ciphertext[0] ^= 0x01;
 
-  std::string decryptedMessage =
-      crypto::MessageCrypto::decrypt(encryptedMessage, bobSessionKeys.rx);
+  try {
+    std::string decryptedMessage =
+        crypto::MessageCrypto::decrypt(encryptedMessage, bobSessionKeys.rx);
 
-  std::cout << "Original message: " << message << '\n';
-  std::cout << "Decrypted message: " << decryptedMessage << '\n';
+    std::cout << "Original message: " << message << '\n';
+    std::cout << "Decrypted message: " << decryptedMessage << '\n';
+  } catch (const std::runtime_error& error) {
+    std::cout << "Decryption failed: " << error.what() << '\n';
+  }
 
   QApplication app(argc, argv);
 

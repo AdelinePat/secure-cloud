@@ -52,19 +52,84 @@ qt_standard_project_setup()
 # Client
 # --------------------------------------------------
 
-qt_add_executable(client
-    src/main.cpp
+add_library(securechat_crypto
     src/crypto/KeyManager.cpp
     src/crypto/MessageCrypto.cpp
 )
 
-target_include_directories(client
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+set_target_properties(securechat_crypto PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+qt_add_executable(client
+    src/main.cpp
+)
+
+set_target_properties(client PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+target_include_directories(securechat_crypto PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(securechat_crypto
+    PUBLIC
+        sodium
 )
 
 target_link_libraries(client
     PRIVATE
         Qt6::Widgets
-        sodium
+        securechat_crypto
+)
+
+# --------------------------------------------------
+# Tests
+# --------------------------------------------------
+
+enable_testing()
+
+add_executable(test_KeyManager
+    tests/crypto/test_KeyManager.cpp
+)
+
+target_link_libraries(test_KeyManager
+    PRIVATE
+        securechat_crypto
+)
+
+set_target_properties(test_KeyManager PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+add_test(
+    NAME KeyManagerTests
+    COMMAND test_KeyManager
+)
+
+add_executable(test_MessageCrypto
+    tests/crypto/test_MessageCrypto.cpp
+)
+
+set_target_properties(test_MessageCrypto PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+target_link_libraries(test_MessageCrypto
+    PRIVATE
+        securechat_crypto
+)
+
+add_test(
+    NAME MessageCryptoTests
+    COMMAND test_MessageCrypto
 )
