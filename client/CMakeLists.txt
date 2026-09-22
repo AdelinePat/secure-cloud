@@ -55,6 +55,7 @@ qt_standard_project_setup()
 add_library(securechat_crypto
     src/crypto/KeyManager.cpp
     src/crypto/MessageCrypto.cpp
+    src/crypto/MessageSerializer.cpp
 )
 
 set_target_properties(securechat_crypto PROPERTIES
@@ -132,4 +133,24 @@ target_link_libraries(test_MessageCrypto
 add_test(
     NAME MessageCryptoTests
     COMMAND test_MessageCrypto
+)
+
+add_executable(test_MessageSerializer
+    tests/crypto/test_MessageSerializer.cpp
+)
+
+set_target_properties(test_MessageSerializer PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+target_link_libraries(test_MessageSerializer
+    PRIVATE
+        securechat_crypto
+)
+
+add_test(
+    NAME MessageSerializerTests
+    COMMAND test_MessageSerializer
 )
