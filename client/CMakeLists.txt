@@ -98,11 +98,12 @@ target_include_directories(securechat_network PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 
 target_link_libraries(securechat_network
     PUBLIC
         Qt6::Core
+        Qt6::Network
         securechat_crypto
 )
 
@@ -242,4 +243,22 @@ target_link_libraries(test_E2EEMessageFlow
 add_test(
     NAME E2EEMessageFlowTests
     COMMAND test_E2EEMessageFlow
+)
+
+# --------------------------------------------------
+# SendMessageRequestCodec tests
+# --------------------------------------------------
+
+add_executable(test_SendMessageRequestCodec
+    tests/network/test_SendMessageRequestCodec.cpp
+)
+
+target_link_libraries(test_SendMessageRequestCodec
+    PRIVATE
+        securechat_network
+)
+
+add_test(
+    NAME SendMessageRequestCodecTests
+    COMMAND test_SendMessageRequestCodec
 )
