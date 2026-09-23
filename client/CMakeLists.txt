@@ -91,6 +91,7 @@ target_link_libraries(client
 
 add_library(securechat_network
     src/network/MessageCodec.cpp
+    src/network/SendMessageRequestCodec.cpp
 )
 
 target_include_directories(securechat_network PUBLIC
