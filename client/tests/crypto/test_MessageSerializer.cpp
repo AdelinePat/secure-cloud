@@ -15,9 +15,24 @@ int main()
 
     std::string encodedNonce = crypto::MessageSerializer::nonceToBase64(originalNonce);
 
-    crypto::Nonce reconstructedNonce = crypto::MessageSerializer::base64ToNonce(crypto::MessageSerializer::nonceToBase64(originalNonce));
+    crypto::Nonce reconstructedNonce = crypto::MessageSerializer::base64ToNonce(encodedNonce);
 
     if (originalNonce != reconstructedNonce)
+    {
+        return 1;
+    }
+
+    crypto::Ciphertext originalCiphertext;
+    
+    originalCiphertext.resize(100);
+
+    randombytes_buf(originalCiphertext.data(), originalCiphertext.size());
+
+    std::string encodedCiphertext = crypto::MessageSerializer::ciphertextToBase64(originalCiphertext);
+
+    crypto::Ciphertext reconstructedCiphertext = crypto::MessageSerializer::base64ToCiphertext(encodedCiphertext);
+
+    if (originalCiphertext != reconstructedCiphertext)
     {
         return 1;
     }

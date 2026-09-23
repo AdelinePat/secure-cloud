@@ -89,8 +89,40 @@ target_link_libraries(client
         securechat_crypto
 )
 
+add_library(securechat_network
+    src/network/MessageCodec.cpp
+)
+
+target_include_directories(securechat_network PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+
+target_link_libraries(securechat_network
+    PUBLIC
+        Qt6::Core
+        securechat_crypto
+)
+
+set_target_properties(securechat_network PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+target_link_libraries(client
+    PRIVATE
+        Qt6::Widgets
+        securechat_network
+)
+
 # --------------------------------------------------
 # Tests
+# --------------------------------------------------
+
+# --------------------------------------------------
+# KeyManager tests
 # --------------------------------------------------
 
 enable_testing()
@@ -115,6 +147,10 @@ add_test(
     COMMAND test_KeyManager
 )
 
+# --------------------------------------------------
+# MessageCrypto tests
+# --------------------------------------------------
+
 add_executable(test_MessageCrypto
     tests/crypto/test_MessageCrypto.cpp
 )
@@ -135,6 +171,10 @@ add_test(
     COMMAND test_MessageCrypto
 )
 
+# --------------------------------------------------
+# MessageSerializer tests
+# --------------------------------------------------
+
 add_executable(test_MessageSerializer
     tests/crypto/test_MessageSerializer.cpp
 )
@@ -153,4 +193,28 @@ target_link_libraries(test_MessageSerializer
 add_test(
     NAME MessageSerializerTests
     COMMAND test_MessageSerializer
+)
+
+# --------------------------------------------------
+# MessageCodec tests
+# --------------------------------------------------
+
+add_executable(test_MessageCodec
+    tests/network/test_MessageCodec.cpp
+)
+
+set_target_properties(test_MessageCodec PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+target_link_libraries(test_MessageCodec
+    PRIVATE
+        securechat_network
+)
+
+add_test(
+    NAME MessageCodecTests
+    COMMAND test_MessageCodec
 )

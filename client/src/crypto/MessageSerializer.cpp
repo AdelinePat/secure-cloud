@@ -35,7 +35,7 @@ Nonce MessageSerializer::base64ToNonce(const std::string& encodedNonce) {
                                  encodedNonce.size(),  // source size
                                  nullptr,              // ignore characters
                                  &decodedLength,       // output length
-                                 nullptr,              // no variant
+                                 nullptr,              // b64_end not needed
                                  sodium_base64_VARIANT_ORIGINAL);
 
   if (result != 0) {
@@ -47,6 +47,52 @@ Nonce MessageSerializer::base64ToNonce(const std::string& encodedNonce) {
   }
 
   return nonce;
+}
+
+std::string MessageSerializer::ciphertextToBase64(
+    const Ciphertext& ciphertext) {
+  std::size_t encodedLength = sodium_base64_ENCODED_LEN(
+      ciphertext.size(), sodium_base64_VARIANT_ORIGINAL);
+
+  std::string encodedCiphertext;
+  encodedCiphertext.resize(encodedLength);
+
+  sodium_bin2base64(encodedCiphertext.data(),  // destination
+                    encodedLength,             // destination size
+                    ciphertext.data(),         // source
+                    ciphertext.size(),         // source size
+                    sodium_base64_VARIANT_ORIGINAL);
+
+  encodedCiphertext.resize(encodedLength - 1);
+
+  return encodedCiphertext;
+}
+
+Ciphertext MessageSerializer::base64ToCiphertext(
+    const std::string& encodedCiphertext) {
+  Ciphertext ciphertext;
+
+  std::size_t maxDecodedLength = (encodedCiphertext.size() / 4) * 3;
+
+  ciphertext.resize(maxDecodedLength);
+
+  size_t decodedLength;
+  int result = sodium_base642bin(ciphertext.data(),         // destination
+                                 ciphertext.size(),         // destination size
+                                 encodedCiphertext.data(),  // source
+                                 encodedCiphertext.size(),  // source size
+                                 nullptr,                   // ignore characters
+                                 &decodedLength,            // output length
+                                 nullptr,  // b64_end not needed
+                                 sodium_base64_VARIANT_ORIGINAL);
+
+  if (result != 0) {
+    throw std::runtime_error("Failed to decode ciphertext from Base64");
+  }
+
+  ciphertext.resize(decodedLength);
+
+  return ciphertext;
 }
 
 }  // namespace crypto
