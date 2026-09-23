@@ -59,7 +59,7 @@ touch queries.sql
 Execute command inside container with
 
 ```bash
-docker compose exec app-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f queries.sql'
+docker compose exec app-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f scratch/queries.sql'
 ```
 
 ### Test mongodb queries
@@ -230,3 +230,45 @@ export LIBGL_ALWAYS_SOFTWARE=1
 ```
 
 > WSL has no GPU access, so Qt's hardware OpenGL rendering fails. This flag forces software rendering instead.
+
+## Database management
+
+### DB init run order
+
+Postgres runs every file in `/docker-entrypoint-initdb.d/` once, alphabetically,
+only on first container start (empty volume). All files below must be mounted
+into that same directory with names that sort in this exact order — later
+files reference tables created by earlier ones:
+
+1. `auth/db/migrations/0001_init.sql`   → creates users, sessions
+2. `file/db/migrations/0001_init.sql`   → creates files (FK → users)
+3. `messaging/db/migrations/0001_init.sql` → creates conversations, participants,
+   messages, message_attachments (FK → users; message_attachments.file_id is
+   intentionally NOT a DB-level FK to files — file and messaging are separate
+   services, so that link is validated at the application layer, not the DB)
+4. `auth/db/seed.sql`   → alice/bob/charlie test users
+5. (add messaging/file seed files here if/when needed)
+
+To re-seed after a schema change: `docker compose down -v && docker compose up`
+(this destroys the volume — only for local dev).
+
+### To re-run seed data manually against a live container without wiping data
+
+```bash
+  docker compose exec app-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/auth_seed.sql'
+```
+
+### to re-run the hash-seed.cpp tool
+
+using a temporary docker container, since it has libsodium:
+
+```bash
+docker compose run --rm --no-deps --entrypoint bash auth \
+  -c "g++ /app/tools/hash_seed.cpp -o /tmp/hash_seed -lsodium && /tmp/hash_seed"
+```
+
+using your own machine:
+
+1. install libsodium
+2. install gcc
+3. `g++ tools/hash_seed.cpp -o hash_seed -lsodium`

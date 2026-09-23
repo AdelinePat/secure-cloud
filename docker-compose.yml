@@ -160,11 +160,20 @@ services:
         source: app-data
         target: /var/lib/postgresql
       - type: bind
-        source: ./app-db-init.sql
-        target: /docker-entrypoint-initdb.d/init.sql
+        source: ./auth/db/0001_auth_init.sql
+        target: /docker-entrypoint-initdb.d/01_auth_init.sql
       - type: bind
-        source: ./queries.sql
-        target: /queries.sql
+        source: ./file/db/0001_file_init.sql
+        target: /docker-entrypoint-initdb.d/02_file_init.sql
+      - type: bind
+        source: ./messaging/db/0001_messaging_init.sql
+        target: /docker-entrypoint-initdb.d/03_messaging_init.sql
+      - type: bind
+        source: ./auth/db/auth_seed.sql
+        target: /docker-entrypoint-initdb.d/04_auth_seed.sql
+      - type: bind
+        source: ./queries.sql   # host: project-root/queries.sql (unchanged, still where it is now)
+        target: /scratch/queries.sql   # container: brand-new path, only exists inside app-db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
