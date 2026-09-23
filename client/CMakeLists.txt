@@ -218,3 +218,27 @@ add_test(
     NAME MessageCodecTests
     COMMAND test_MessageCodec
 )
+
+# --------------------------------------------------
+# E2EE integration test
+# --------------------------------------------------
+
+add_executable(test_E2EEMessageFlow
+    tests/integration/test_E2EEMessageFlow.cpp
+)
+
+set_target_properties(test_E2EEMessageFlow PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+
+target_link_libraries(test_E2EEMessageFlow
+    PRIVATE
+        securechat_network
+)
+
+add_test(
+    NAME E2EEMessageFlowTests
+    COMMAND test_E2EEMessageFlow
+)
