@@ -1,8 +1,13 @@
 #include <QHostAddress>
+
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest/QtTest>
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 #include "network/HttpClient.hpp"
 #include "network/dto/SendMessageRequest.hpp"
@@ -60,6 +65,38 @@ void TestHttpClient::sendMessage_sendsPostRequest() {
   QByteArray receivedData = socket->readAll();
 
   qDebug().noquote() << receivedData;
+
+  QVERIFY(receivedData.startsWith(
+      "POST /secureChat/conversations/conversation-123/messages HTTP/1.1"));
+
+  QVERIFY(receivedData.contains("Content-Type: application/json"));
+
+  QVERIFY(receivedData.contains("Authorization: Bearer fake-jwt-token"));
+
+  qsizetype bodyPosition = receivedData.indexOf("\r\n\r\n");
+
+  QVERIFY(bodyPosition != -1);
+
+  QByteArray body = receivedData.mid(bodyPosition + 4);
+
+  QJsonDocument jsonDocument = QJsonDocument::fromJson(body);
+  QVERIFY(jsonDocument.isObject());
+
+  QJsonObject json = jsonDocument.object();
+  QCOMPARE(json["message_id"].toString(), QString("message-123"));
+
+  QCOMPARE(json["encryption_version"].toInt(), 1);
+
+  QCOMPARE(json["client_timestamp"].toString(),
+           QString("2026-09-25T12:00:00Z"));
+
+  QCOMPARE(json["nonce"].toString(),
+           QString("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"));
+
+  QCOMPARE(json["ciphertext"].toString(), QString("ChQeKA=="));
+
+  QVERIFY(json["attachments"].isArray());
+  QVERIFY(json["attachments"].toArray().isEmpty());
 }
 
 QTEST_MAIN(TestHttpClient)
