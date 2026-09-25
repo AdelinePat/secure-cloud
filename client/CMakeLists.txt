@@ -44,7 +44,12 @@ FetchContent_MakeAvailable(Sodium)
 # Qt
 # --------------------------------------------------
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS
+    Core
+    Widgets
+    Network
+    Test
+)
 
 qt_standard_project_setup()
 
@@ -92,13 +97,14 @@ target_link_libraries(client
 add_library(securechat_network
     src/network/MessageCodec.cpp
     src/network/SendMessageRequestCodec.cpp
+    src/network/HttpClient.cpp
+
+    include/network/HttpClient.hpp
 )
 
 target_include_directories(securechat_network PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 
 target_link_libraries(securechat_network
     PUBLIC
@@ -108,7 +114,7 @@ target_link_libraries(securechat_network
 )
 
 set_target_properties(securechat_network PROPERTIES
-    AUTOMOC OFF
+    AUTOMOC ON
     AUTOUIC OFF
     AUTORCC OFF
 )
@@ -261,4 +267,23 @@ target_link_libraries(test_SendMessageRequestCodec
 add_test(
     NAME SendMessageRequestCodecTests
     COMMAND test_SendMessageRequestCodec
+)
+
+# --------------------------------------------------
+# HttpClient tests
+# --------------------------------------------------
+
+add_executable(test_HttpClient
+    tests/network/test_HttpClient.cpp
+)
+
+target_link_libraries(test_HttpClient
+    PRIVATE
+        securechat_network
+        Qt6::Test
+)
+
+add_test(
+    NAME HttpClientTests
+    COMMAND test_HttpClient
 )
