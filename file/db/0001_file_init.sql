@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS files (
   checksum varchar NOT NULL,
   storage_ref varchar NOT NULL,
   encryption_algorithm varchar NOT NULL DEFAULT 'AES-256-GCM',
-  nonce varchar NOT NULL,
+  nonce text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at timestamptz,
 
