@@ -99,7 +99,12 @@ add_library(securechat_network
     src/network/SendMessageRequestCodec.cpp
     src/network/HttpClient.cpp
     src/network/SendMessageResultMapper.cpp
+    src/network/MessageService.cpp
+    src/ui/MessageStatusMapper.cpp
 
+    include/ui/MessageStatusMapper.hpp
+    include/ui/MessageStatus.hpp
+    include/network/MessageService.hpp
     include/network/HttpClient.hpp
 )
 
@@ -310,4 +315,49 @@ target_link_libraries(test_SendMessageResultMapper PRIVATE
 add_test(
     NAME SendMessageResultMapperTests
     COMMAND test_SendMessageResultMapper
+)
+
+# --------------------------------------------------
+# MessageService tests
+# --------------------------------------------------
+
+add_executable(test_MessageService
+    tests/network/test_MessageService.cpp
+)
+
+set_target_properties(test_MessageService PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_MessageService PRIVATE
+    securechat_network
+    Qt6::Test
+    Qt6::Network
+)
+
+add_test(
+    NAME MessageServiceTests
+    COMMAND test_MessageService
+)
+
+# --------------------------------------------------
+# MessageStatusMapper tests
+# --------------------------------------------------
+
+add_executable(test_MessageStatusMapper
+    tests/ui/test_MessageStatusMapper.cpp
+)
+
+target_link_libraries(test_MessageStatusMapper PRIVATE
+    securechat_network
+    Qt6::Test
+)
+
+set_target_properties(test_MessageStatusMapper PROPERTIES
+    AUTOMOC ON
+)
+
+add_test(
+    NAME MessageStatusMapperTests
+    COMMAND test_MessageStatusMapper
 )

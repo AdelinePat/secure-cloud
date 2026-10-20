@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QMetaType>
 
 namespace network::dto {
 
@@ -19,3 +20,5 @@ struct SendMessageResult {
 };
 
 }  // namespace network::dto
+
+Q_DECLARE_METATYPE(network::dto::SendMessageResult)
