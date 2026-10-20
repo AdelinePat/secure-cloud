@@ -98,6 +98,7 @@ add_library(securechat_network
     src/network/MessageCodec.cpp
     src/network/SendMessageRequestCodec.cpp
     src/network/HttpClient.cpp
+    src/network/SendMessageResultMapper.cpp
 
     include/network/HttpClient.hpp
 )
@@ -286,4 +287,27 @@ target_link_libraries(test_HttpClient
 add_test(
     NAME HttpClientTests
     COMMAND test_HttpClient
+)
+
+# --------------------------------------------------
+# SendMessageResultMapper tests
+# --------------------------------------------------
+
+add_executable(test_SendMessageResultMapper
+    tests/network/test_SendMessageResultMapper.cpp
+)
+
+set_target_properties(test_SendMessageResultMapper PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_SendMessageResultMapper PRIVATE
+    securechat_network
+    Qt6::Test
+    Qt6::Network
+)
+
+add_test(
+    NAME SendMessageResultMapperTests
+    COMMAND test_SendMessageResultMapper
 )
