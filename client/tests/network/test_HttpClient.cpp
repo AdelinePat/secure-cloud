@@ -56,6 +56,8 @@ void TestHttpClient::sendMessage_sendsPostRequest() {
 
   QVERIFY(socket != nullptr);
 
+  QSignalSpy finishedSpy(reply, &QNetworkReply::finished);
+
   QSignalSpy readyReadSpy(socket, &QTcpSocket::readyRead);
 
   if (socket->bytesAvailable() == 0) {
@@ -97,6 +99,49 @@ void TestHttpClient::sendMessage_sendsPostRequest() {
 
   QVERIFY(json["attachments"].isArray());
   QVERIFY(json["attachments"].toArray().isEmpty());
+
+  QByteArray responseBody = R"({"success":true})";
+
+  QByteArray response =
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: application/json\r\n"
+    "Content-Length: " +
+    QByteArray::number(responseBody.size()) +
+    "\r\n"
+    "Connection: close\r\n"
+    "\r\n" +
+    responseBody;
+
+    qint64 bytesWritten = socket->write(response);
+
+  QCOMPARE(bytesWritten, static_cast<qint64>(response.size()));
+
+  socket->flush();
+
+  if (!reply->isFinished()) {
+      QVERIFY(finishedSpy.wait(3000));
+  }
+
+  QCOMPARE(
+    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(),
+    200
+  );
+
+  QByteArray responseData = reply->readAll();
+
+  QJsonDocument responseJson = QJsonDocument::fromJson(responseData);
+
+  QVERIFY(responseJson.isObject());
+
+  QJsonObject responseObject = responseJson.object();
+
+  QVERIFY(responseObject.contains("success"));
+
+  QCOMPARE(responseObject["success"].toBool(), true);
+
+  QVERIFY(responseObject["success"].isBool());
+
+  reply->deleteLater();
 }
 
 QTEST_MAIN(TestHttpClient)

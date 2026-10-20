@@ -1,6 +1,7 @@
 #include "network/HttpClient.hpp"
-
 #include "network/SendMessageRequestCodec.hpp"
+
+#include <QNetworkRequest>
 
 namespace network {
 
