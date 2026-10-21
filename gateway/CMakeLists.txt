@@ -18,7 +18,10 @@ find_package(GTest REQUIRED)
 add_library(gateway_lib STATIC
     src/HttpServer.cpp
     src/HttpResponse.cpp
-    src/HttpRouter.cpp)
+    src/HttpRouter.cpp
+    src/HttpClient.cpp
+    src/ServiceConfig.cpp
+)
 
 target_include_directories(gateway_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -63,6 +66,7 @@ add_executable(gateway_tests
     tests/test_HttpServer.cpp
     tests/test_HttpResponse.cpp
     tests/test_HttpRouter.cpp
+    tests/test_HttpClient.cpp
 )
 
 target_link_libraries(gateway_tests PRIVATE
