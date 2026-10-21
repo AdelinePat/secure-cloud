@@ -4,6 +4,9 @@
 #include <QTextEdit>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QHash>
+
+#include "ui/ChatMessage.hpp"
 
 namespace ui {
 
@@ -20,6 +23,7 @@ private:
     QTextEdit* messageView_;
     QLineEdit* messageInput_;
     QPushButton* sendButton_;
+    QHash<QString, ChatMessage> messages_;
 
 };
 
