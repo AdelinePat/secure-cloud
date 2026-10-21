@@ -19,6 +19,8 @@ add_library(gateway_lib STATIC
     src/HttpServer.cpp
     src/HttpResponse.cpp
     src/HttpRouter.cpp
+    src/HttpClient.cpp
+    src/ServiceConfig.cpp
 )
 
 target_include_directories(gateway_lib PUBLIC
@@ -60,6 +62,7 @@ add_executable(gateway_tests
     tests/test_HttpServer.cpp
     tests/test_HttpResponse.cpp
     tests/test_HttpRouter.cpp
+    tests/test_HttpClient.cpp
 )
 
 target_link_libraries(gateway_tests PRIVATE
