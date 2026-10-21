@@ -55,6 +55,16 @@ void MainWindow::onSendClicked()
     // Generate a unique identifier for the message
     QString messageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
+     // Create the UI message model
+    ChatMessage chatMessage{
+        messageId,
+        message,
+        MessageStatus::Sending
+    };
+
+     // Store the message using its UUID
+    messages_.insert(messageId, chatMessage);
+
     // Display the message with its initial status
     messageView_->append(
         "You: " + message + " [Sending...]"
