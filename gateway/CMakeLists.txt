@@ -18,8 +18,7 @@ find_package(GTest REQUIRED)
 add_library(gateway_lib STATIC
     src/HttpServer.cpp
     src/HttpResponse.cpp
-    src/HttpRouter.cpp
-)
+    src/HttpRouter.cpp)
 
 target_include_directories(gateway_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -43,9 +42,13 @@ add_executable(gateway
     src/main.cpp
 )
 
-target_link_libraries(gateway PRIVATE
-    gateway_lib
+target_include_directories(gateway PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+if(TARGET gateway_lib)
+    target_link_libraries(gateway PRIVATE gateway_lib)
+endif()
 
 target_compile_options(gateway PRIVATE
     -Wall

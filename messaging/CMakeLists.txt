@@ -11,35 +11,48 @@ find_package(OpenSSL REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(libpqxx REQUIRED)
 
-# set(SET_OF_FILE
-#     src/file/file.cpp
-# )
-
-# ── messaging library (all logic, no main) ──────────────────────────────────────
-# add_library(messaging_lib STATIC
-#     # ${SET_OF_FILE}
-# )
-
-target_include_directories(messaging_lib PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+# ── messaging library (all logic, no main) ──────────────────────────────────
+# Everything under src/ except main.cpp — main.cpp stays exclusive to the
+# `messaging` executable below, so it's never compiled into two objects at once.
+file(GLOB_RECURSE MESSAGING_LIB_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
+list(FILTER MESSAGING_LIB_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
 
-target_link_libraries(messaging_lib PUBLIC
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    libpqxx::pqxx
-)
+if(MESSAGING_LIB_SOURCES)
+    add_library(messaging_lib STATIC
+        ${MESSAGING_LIB_SOURCES}
+    )
 
-target_compile_options(messaging_lib PRIVATE
-    -Wall -Wextra -Wpedantic
-)
+    target_include_directories(messaging_lib PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
 
-# ── messaging executable ─────────────────────────────────────────────────────────
+    target_link_libraries(messaging_lib PUBLIC
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        libpqxx::pqxx
+    )
+
+    target_compile_options(messaging_lib PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+else()
+    message(STATUS "messaging: no sources under src/ yet (besides main.cpp) — messaging_lib not built")
+endif()
+
+# ── messaging executable ─────────────────────────────────────────────────────
 add_executable(messaging
     src/main.cpp
 )
 
-target_link_libraries(messaging PRIVATE messaging_lib)
+target_include_directories(messaging PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(TARGET messaging_lib)
+    target_link_libraries(messaging PRIVATE messaging_lib)
+endif()
 
 target_compile_options(messaging PRIVATE
     -Wall -Wextra -Wpedantic
@@ -49,22 +62,34 @@ target_compile_options(messaging PRIVATE
 enable_testing()
 find_package(GTest REQUIRED)
 
-add_executable(messaging_tests
+file(GLOB_RECURSE MESSAGING_TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
 )
 
-target_include_directories(messaging_tests PRIVATE
-${CMAKE_CURRENT_SOURCE_DIR}/tests
-)
+if(MESSAGING_TEST_SOURCES)
+    add_executable(messaging_tests
+        ${MESSAGING_TEST_SOURCES}
+    )
 
-target_link_libraries(messaging_tests PRIVATE
-messaging_lib
-GTest::gtest
-GTest::gmock
-GTest::gtest_main
-)
+    target_include_directories(messaging_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
 
-target_compile_options(messaging_tests PRIVATE
--Wall -Wextra -Wpedantic
-)
+    if(TARGET messaging_lib)
+        target_link_libraries(messaging_tests PRIVATE messaging_lib)
+    endif()
 
-add_test(NAME messaging_tests COMMAND messaging_tests)
+    target_link_libraries(messaging_tests PRIVATE
+        GTest::gtest
+        GTest::gmock
+        GTest::gtest_main
+    )
+
+    target_compile_options(messaging_tests PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+
+    add_test(NAME messaging_tests COMMAND messaging_tests)
+else()
+    message(STATUS "messaging: no sources under tests/ yet — messaging_tests not built")
+endif()

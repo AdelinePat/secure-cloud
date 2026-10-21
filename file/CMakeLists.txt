@@ -11,35 +11,48 @@ find_package(OpenSSL REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(libpqxx REQUIRED)
 
-# set(SET_OF_FILE
-#     src/file/file.cpp
-# )
-
 # ── file library (all logic, no main) ──────────────────────────────────────
-# add_library(file_lib STATIC
-#     # ${SET_OF_FILE}
-# )
-
-target_include_directories(file_lib PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+# Everything under src/ except main.cpp — main.cpp stays exclusive to the
+# `file` executable below, so it's never compiled into two objects at once.
+file(GLOB_RECURSE FILE_LIB_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
+list(FILTER FILE_LIB_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
 
-target_link_libraries(file_lib PUBLIC
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    libpqxx::pqxx
-)
+if(FILE_LIB_SOURCES)
+    add_library(file_lib STATIC
+        ${FILE_LIB_SOURCES}
+    )
 
-target_compile_options(file_lib PRIVATE
-    -Wall -Wextra -Wpedantic
-)
+    target_include_directories(file_lib PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(file_lib PUBLIC
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        libpqxx::pqxx
+    )
+
+    target_compile_options(file_lib PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+else()
+    message(STATUS "file: no sources under src/ yet (besides main.cpp) — file_lib not built")
+endif()
 
 # ── file executable ─────────────────────────────────────────────────────────
 add_executable(file
     src/main.cpp
 )
 
-target_link_libraries(file PRIVATE file_lib)
+target_include_directories(file PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(TARGET file_lib)
+    target_link_libraries(file PRIVATE file_lib)
+endif()
 
 target_compile_options(file PRIVATE
     -Wall -Wextra -Wpedantic
@@ -49,22 +62,34 @@ target_compile_options(file PRIVATE
 enable_testing()
 find_package(GTest REQUIRED)
 
-add_executable(file_tests
+file(GLOB_RECURSE FILE_TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
 )
 
-target_include_directories(file_tests PRIVATE
-${CMAKE_CURRENT_SOURCE_DIR}/tests
-)
+if(FILE_TEST_SOURCES)
+    add_executable(file_tests
+        ${FILE_TEST_SOURCES}
+    )
 
-target_link_libraries(file_tests PRIVATE
-file_lib
-GTest::gtest
-GTest::gmock
-GTest::gtest_main
-)
+    target_include_directories(file_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
 
-target_compile_options(file_tests PRIVATE
--Wall -Wextra -Wpedantic
-)
+    if(TARGET file_lib)
+        target_link_libraries(file_tests PRIVATE file_lib)
+    endif()
 
-add_test(NAME file_tests COMMAND file_tests)
+    target_link_libraries(file_tests PRIVATE
+        GTest::gtest
+        GTest::gmock
+        GTest::gtest_main
+    )
+
+    target_compile_options(file_tests PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+
+    add_test(NAME file_tests COMMAND file_tests)
+else()
+    message(STATUS "file: no sources under tests/ yet — file_tests not built")
+endif()
