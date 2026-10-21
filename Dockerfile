@@ -17,6 +17,8 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     # Quality of life
     git \
     openssl-devel \
+    # HTTP server dependencies
+    boost-devel \
     # PostgreSQL client (to connect to TimescaleDB)
     libpq-devel \
     libpqxx-devel \
