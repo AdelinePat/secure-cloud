@@ -1,25 +1,22 @@
 #include <sodium.h>
 
 #include <QApplication>
-#include <QMainWindow>
-#include <iomanip>
-#include <iostream>
-#include <vector>
 
-#include "crypto/KeyManager.hpp"
-#include "crypto/MessageCrypto.hpp"
+#include "ui/MainWindow.hpp"
 
-int main(int argc, char* argv[]) {
-  if (sodium_init() < 0) {
-    return 1;
-  }
+int main(int argc, char* argv[])
+{
+    // Initialisation of libsodium
+    if (sodium_init() < 0) {
+        return 1;
+    }
 
-  QApplication app(argc, argv);
+    // Initialisation of the Qt application
+    QApplication app(argc, argv);
 
-  QMainWindow window;
-  window.setWindowTitle("SecureChat");
-  window.resize(800, 600);
-  window.show();
+    // Creation of our SecureChat window
+    ui::MainWindow window;
+    window.show();
 
-  return app.exec();
+    return app.exec();
 }

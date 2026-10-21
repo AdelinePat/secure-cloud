@@ -71,12 +71,18 @@ set_target_properties(securechat_crypto PROPERTIES
 
 qt_add_executable(client
     src/main.cpp
+    src/ui/MainWindow.cpp
+    include/ui/MainWindow.hpp
 )
 
 set_target_properties(client PROPERTIES
-    AUTOMOC OFF
+    AUTOMOC ON
     AUTOUIC OFF
     AUTORCC OFF
+)
+
+target_include_directories(client PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_include_directories(securechat_crypto PUBLIC
