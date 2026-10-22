@@ -19,6 +19,8 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     openssl-devel \
     # HTTP server dependencies
     boost-devel \
+    # Password hashing (Argon2id)
+    libsodium-devel \
     # PostgreSQL client (to connect to TimescaleDB)
     libpq-devel \
     libpqxx-devel \

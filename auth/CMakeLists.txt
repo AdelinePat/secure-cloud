@@ -10,6 +10,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(OpenSSL REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(libpqxx REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
 
 # ── auth library (all logic, no main) ──────────────────────────────────────
 # Everything under src/ except main.cpp — main.cpp stays exclusive to the
@@ -30,9 +33,11 @@ if(AUTH_LIB_SOURCES)
     )
 
     target_link_libraries(auth_lib PUBLIC
+        Boost::system
         OpenSSL::SSL
         OpenSSL::Crypto
         libpqxx::pqxx
+        PkgConfig::SODIUM
     )
 
     target_compile_options(auth_lib PRIVATE
