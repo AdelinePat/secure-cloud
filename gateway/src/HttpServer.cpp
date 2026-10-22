@@ -15,7 +15,11 @@ namespace http = beast::http;
 using tcp = boost::asio::ip::tcp;
 
 HttpServer::HttpServer(boost::asio::io_context& ioContext, std::uint16_t port)
-    : ioContext_(ioContext), port_(port), acceptor_(ioContext) {}
+    : ioContext_(ioContext),
+      port_(port),
+      acceptor_(ioContext),
+      httpClient_(),
+      router_(httpClient_) {}
 
 void HttpServer::start() {
   using boost::asio::ip::tcp;
@@ -41,7 +45,8 @@ void HttpServer::start() {
 
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
  public:
-  explicit HttpSession(tcp::socket socket) : stream_(std::move(socket)) {}
+  explicit HttpSession(tcp::socket socket, HttpRouter& router)
+      : stream_(std::move(socket)), router_(router) {}
 
   void start() { readRequest(); }
 
@@ -62,7 +67,7 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
 
   void sendResponse() {
     // Keep the response alive until the asynchronous write completes
-    response_ = HttpRouter::route(request_);
+    response_ = router_.route(request_);
     response_.keep_alive(false);
 
     auto self = shared_from_this();
@@ -84,6 +89,7 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
 
   http::request<http::string_body> request_;
   http::response<http::string_body> response_;
+  HttpRouter& router_;
 };
 
 std::uint16_t HttpServer::localPort() const {
@@ -92,28 +98,27 @@ std::uint16_t HttpServer::localPort() const {
 }
 
 void HttpServer::acceptConnection() {
-    using boost::asio::ip::tcp;
+  using boost::asio::ip::tcp;
 
-    std::cerr << "[SERVER] Waiting for connection..." << '\n';
+  std::cerr << "[SERVER] Waiting for connection..." << '\n';
 
-    acceptor_.async_accept(
-        [this](const boost::system::error_code& ec, tcp::socket socket) {
-            if (!ec) {
-                ++acceptedConnections_;
+  acceptor_.async_accept(
+      [this](const boost::system::error_code& ec, tcp::socket socket) {
+        if (!ec) {
+          ++acceptedConnections_;
 
-                std::cerr << "[SERVER] Connection accepted: "
-                          << acceptedConnections_ << '\n';
+          std::cerr << "[SERVER] Connection accepted: " << acceptedConnections_
+                    << '\n';
 
-                std::make_shared<HttpSession>(std::move(socket))->start();
-            } else {
-                std::cerr << "[SERVER] Accept error: "
-                          << ec.message() << '\n';
-            }
+          std::make_shared<HttpSession>(std::move(socket), router_)->start();
+        } else {
+          std::cerr << "[SERVER] Accept error: " << ec.message() << '\n';
+        }
 
-            if (acceptor_.is_open()) {
-                acceptConnection();
-            }
-        });
+        if (acceptor_.is_open()) {
+          acceptConnection();
+        }
+      });
 }
 
 std::size_t HttpServer::acceptedConnections() const {

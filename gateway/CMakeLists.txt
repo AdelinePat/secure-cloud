@@ -63,6 +63,7 @@ add_executable(gateway_tests
     tests/test_HttpResponse.cpp
     tests/test_HttpRouter.cpp
     tests/test_HttpClient.cpp
+    tests/test_ServiceConfig.cpp
 )
 
 target_link_libraries(gateway_tests PRIVATE
