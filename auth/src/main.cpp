@@ -1,14 +1,20 @@
+#include <sodium.h>
+
 #include <boost/asio.hpp>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "auth/HttpServer.hpp"
 
 int main() {
   try {
+    if (sodium_init() < 0) {
+      throw std::runtime_error("Failed to initialize libsodium");
+    }
     const char* envPort = std::getenv("AUTH_PORT");
 
     const std::uint16_t port =

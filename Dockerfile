@@ -16,9 +16,11 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     file \
     # Quality of life
     git \
+    openssl \
     openssl-devel \
     # HTTP server dependencies
     boost-devel \
+    json-devel \
     # Password hashing (Argon2id)
     libsodium-devel \
     # PostgreSQL client (to connect to TimescaleDB)

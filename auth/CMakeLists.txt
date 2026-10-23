@@ -13,6 +13,7 @@ find_package(libpqxx REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # ── auth library (all logic, no main) ──────────────────────────────────────
 # Everything under src/ except main.cpp — main.cpp stays exclusive to the
@@ -38,6 +39,7 @@ if(AUTH_LIB_SOURCES)
         OpenSSL::Crypto
         libpqxx::pqxx
         PkgConfig::SODIUM
+        nlohmann_json::nlohmann_json
     )
 
     target_compile_options(auth_lib PRIVATE
