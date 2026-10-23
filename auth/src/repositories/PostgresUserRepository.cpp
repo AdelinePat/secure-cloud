@@ -12,7 +12,8 @@ domain::User PostgresUserRepository::rowToUser(const pqxx::row& row) {
   u.email = row["email"].as<std::string>();
   u.password_hash = row["password_hash"].as<std::string>();
   u.public_key = row["public_key"].as<std::string>();
-  u.key_algorithm = row["key_algorithm"].as<std::string>();
+  // The current database schema does not store the key algorithm.
+  u.key_algorithm = "";
   u.created_at = row["created_at"].as<std::string>();
   u.updated_at = row["updated_at"].as<std::string>();
   return u;
@@ -22,12 +23,11 @@ domain::User PostgresUserRepository::create(const domain::User& user) {
   pqxx::work txn(conn_);
 
   auto result = txn.exec_params(
-      "INSERT INTO users (username, email, password_hash, public_key, key_algorithm) "
-      "VALUES ($1, $2, $3, $4, $5) "
-      "RETURNING id, username, email, password_hash, public_key, key_algorithm, "
+      "INSERT INTO users (username, email, password_hash, public_key) "
+      "VALUES ($1, $2, $3, $4) "
+      "RETURNING id, username, email, password_hash, public_key, "
       "          created_at::text, updated_at::text",
-      user.username, user.email, user.password_hash, user.public_key,
-      user.key_algorithm);
+      user.username, user.email, user.password_hash, user.public_key);
 
   txn.commit();
   return rowToUser(result[0]);
@@ -38,7 +38,7 @@ std::optional<domain::User> PostgresUserRepository::findById(
   pqxx::work txn(conn_);
 
   auto result = txn.exec_params(
-      "SELECT id, username, email, password_hash, public_key, key_algorithm, "
+      "SELECT id, username, email, password_hash, public_key, "
       "       created_at::text, updated_at::text "
       "FROM users WHERE id = $1",
       id);
@@ -54,7 +54,7 @@ std::optional<domain::User> PostgresUserRepository::findByUsername(
   pqxx::work txn(conn_);
 
   auto result = txn.exec_params(
-      "SELECT id, username, email, password_hash, public_key, key_algorithm, "
+      "SELECT id, username, email, password_hash, public_key, "
       "       created_at::text, updated_at::text "
       "FROM users WHERE username = $1",
       username);
@@ -66,11 +66,10 @@ std::optional<domain::User> PostgresUserRepository::findByUsername(
 }
 
 bool PostgresUserRepository::updateUsername(const std::string& id,
-                                             const std::string& newUsername) {
+                                            const std::string& newUsername) {
   pqxx::work txn(conn_);
-  auto result =
-      txn.exec_params("UPDATE users SET username = $1 WHERE id = $2",
-                       newUsername, id);
+  auto result = txn.exec_params("UPDATE users SET username = $1 WHERE id = $2",
+                                newUsername, id);
   txn.commit();
   return result.affected_rows() > 0;
 }
@@ -78,9 +77,8 @@ bool PostgresUserRepository::updateUsername(const std::string& id,
 bool PostgresUserRepository::updatePasswordHash(
     const std::string& id, const std::string& newPasswordHash) {
   pqxx::work txn(conn_);
-  auto result =
-      txn.exec_params("UPDATE users SET password_hash = $1 WHERE id = $2",
-                       newPasswordHash, id);
+  auto result = txn.exec_params(
+      "UPDATE users SET password_hash = $1 WHERE id = $2", newPasswordHash, id);
   txn.commit();
   return result.affected_rows() > 0;
 }

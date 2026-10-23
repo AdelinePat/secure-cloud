@@ -12,7 +12,8 @@ using tcp = asio::ip::tcp;
 
 class HttpServer {
  public:
-  HttpServer(asio::io_context& ioContext, std::uint16_t port);
+  HttpServer(asio::io_context& ioContext, std::uint16_t port,
+             services::AuthService& authService);
 
   void run();
 

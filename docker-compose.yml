@@ -47,6 +47,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB_DATA}
+      AUTH_DATABASE_URL: "host=app-db port=${DB_PORT} dbname=${POSTGRES_DB_DATA} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}"
+      AUTH_JWT_PRIVATE_KEY_PATH: "/app/auth-keys/private.pem"
+      AUTH_JWT_PUBLIC_KEY_PATH: "/app/auth-keys/public.pem"
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
