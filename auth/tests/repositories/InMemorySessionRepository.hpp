@@ -1,5 +1,8 @@
 #pragma once
 
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <random>
 #include <sstream>
 #include <unordered_map>
@@ -23,6 +26,56 @@ class InMemorySessionRepository : public ISessionRepository {
     for (const auto& [id, s] : sessionsById_) {
       if (s.refresh_token_hash == hash) return s;
     }
+    return std::nullopt;
+  }
+
+  std::optional<domain::Session> rotate(
+      const std::string& currentRefreshTokenHash,
+      const domain::Session& newSession) override {
+    for (auto& [id, session] : sessionsById_) {
+      // Find the session associated with the presented token hash.
+      if (session.refresh_token_hash != currentRefreshTokenHash) {
+        continue;
+      }
+
+      // Reject revoked sessions.
+      if (session.revoked_at.has_value()) {
+        return std::nullopt;
+      }
+
+      // Ensure the replacement belongs to the same user.
+      if (session.user_id != newSession.user_id) {
+        return std::nullopt;
+      }
+
+      // Reject expired sessions.
+      std::tm expiration = {};
+      std::istringstream stream(session.expires_at);
+      stream >> std::get_time(&expiration, "%Y-%m-%dT%H:%M:%S");
+
+      if (stream.fail()) {
+        return std::nullopt;
+      }
+
+      const std::time_t expirationTime = timegm(&expiration);
+      const std::time_t now = std::time(nullptr);
+
+      if (expirationTime <= now) {
+        return std::nullopt;
+      }
+
+      // Keep the current session ID before inserting a new element.
+      const std::string currentSessionId = id;
+
+      // Create the replacement session.
+      domain::Session created = create(newSession);
+
+      // Revoke the previous session using its ID.
+      sessionsById_.at(currentSessionId).revoked_at = "1970-01-01T00:00:00Z";
+
+      return created;
+    }
+
     return std::nullopt;
   }
 

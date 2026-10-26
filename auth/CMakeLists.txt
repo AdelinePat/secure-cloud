@@ -73,6 +73,8 @@ find_package(GTest REQUIRED)
 file(GLOB_RECURSE AUTH_TEST_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
 )
+# Exclude the standalone integration utility from GoogleTest sources.
+list(FILTER AUTH_TEST_SOURCES EXCLUDE REGEX ".*/seed_test_user\\.cpp$")
 
 if(AUTH_TEST_SOURCES)
     add_executable(auth_tests
@@ -101,3 +103,12 @@ if(AUTH_TEST_SOURCES)
 else()
     message(STATUS "auth: no sources under tests/ yet — auth_tests not built")
 endif()
+
+# Temporary integration test utility.
+add_executable(seed_test_user
+    tests/seed_test_user.cpp
+)
+
+target_link_libraries(seed_test_user
+    PRIVATE auth_lib
+)

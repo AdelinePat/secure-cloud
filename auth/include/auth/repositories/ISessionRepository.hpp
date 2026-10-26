@@ -17,11 +17,18 @@ class ISessionRepository {
   virtual std::optional<domain::Session> findByRefreshTokenHash(
       const std::string& hash) = 0;
 
+  // Atomically revoke a valid session and create its replacement.
+  // Returns nullopt if the current session is missing, expired, or revoked.
+  virtual std::optional<domain::Session> rotate(
+      const std::string& currentRefreshTokenHash,
+      const domain::Session& newSession) = 0;
+
   // Marks a single session revoked. Returns false if not found.
   virtual bool revoke(const std::string& sessionId) = 0;
 
   // Marks every non-revoked session for a user as revoked (e.g. "log out
-  // everywhere" / emergency revocation). Returns the number of sessions revoked.
+  // everywhere" / emergency revocation). Returns the number of sessions
+  // revoked.
   virtual int revokeAllForUser(const std::string& userId) = 0;
 };
 
