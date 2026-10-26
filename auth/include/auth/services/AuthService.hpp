@@ -19,6 +19,15 @@ struct LoginResult {
   std::string refreshToken;
 };
 
+struct RefreshRequest {
+  std::string refreshToken;
+};
+
+struct RefreshResult {
+  std::string accessToken;
+  std::string refreshToken;
+};
+
 class AuthService {
  public:
   AuthService(repositories::IUserRepository& userRepository,
@@ -26,6 +35,8 @@ class AuthService {
               const crypto::JwtKeyManager& jwtKeyManager);
 
   std::optional<LoginResult> login(const LoginRequest& request);
+
+  std::optional<RefreshResult> refresh(const RefreshRequest& request);
 
  private:
   repositories::IUserRepository& userRepository_;

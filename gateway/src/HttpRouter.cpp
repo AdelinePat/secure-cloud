@@ -75,6 +75,43 @@ http::response<http::string_body> HttpRouter::route(
     }
   }
 
+  // Route 3: Proxy Auth login and refresh requests.
+  if (request.target() == "/auth/login" ||
+      request.target() == "/auth/refresh") {
+    const char* authHost = std::getenv("AUTH_HOST");
+    const char* authPort = std::getenv("AUTH_PORT");
+
+    const std::string host = authHost ? authHost : "auth";
+    const std::uint16_t port =
+        authPort ? static_cast<std::uint16_t>(std::stoi(authPort)) : 8081;
+
+    // Forward the original request to the Auth service.
+    http::request<http::string_body> authRequest = request;
+
+    authRequest.set(http::field::host, host);
+    authRequest.keep_alive(false);
+    authRequest.erase(http::field::authorization);
+    authRequest.erase(http::field::cookie);
+
+    try {
+      return httpClient_.send(host, port, authRequest);
+
+    } catch (const std::exception& exception) {
+      // Log internal errors without exposing them to clients.
+      std::cerr << "Auth upstream error: " << exception.what() << '\n';
+
+      http::response<http::string_body> response{http::status::bad_gateway,
+                                                 request.version()};
+
+      response.set(http::field::content_type, "application/json");
+      response.body() = R"({"error":"AUTH_SERVICE_UNAVAILABLE"})";
+      response.keep_alive(false);
+      response.prepare_payload();
+
+      return response;
+    }
+  }
+
   // Route 3: Unknown endpoint
   http::response<http::string_body> response{http::status::not_found,
                                              request.version()};
