@@ -129,11 +129,20 @@ services:
       audit-db:
         condition: service_healthy
     environment:
-      DB_HOST: "audit-db"
-      DB_PORT: ${DB_PORT}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB_DATA}
+      MONGO_HOST: "audit-db"
+      MONGO_PORT: ${AUDIT_DB_PORT}
+      MONGO_DB: ${MONGO_DB_AUDIT}
+      MONGO_USER: ${MONGO_USER}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_AUTH_SOURCE: ${MONGO_DB_AUDIT}
+      AUDIT_PORT: ${AUDIT_PORT}
+      AUDIT_TLS_ENABLED: "true"
+      AUDIT_TLS_CERT: /app/certs/audit/audit.crt
+      AUDIT_TLS_KEY: /app/certs/audit/audit.key
+      AUDIT_TLS_CA: /app/certs/ca/ca.crt
+      AUDIT_ALLOWED_SERVICES: "auth,file,messaging,gateway"
+    expose:
+      - "${AUDIT_PORT}"
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt

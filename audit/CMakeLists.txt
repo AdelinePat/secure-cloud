@@ -6,19 +6,34 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+include(FetchContent)
+
 # ── Dependencies ───────────────────────────────────────────────────────────
 find_package(OpenSSL REQUIRED)
-find_package(PostgreSQL REQUIRED)
-find_package(libpqxx REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0 libbson-1.0)
 
-# set(SET_OF_FILE
-#     src/file/file.cpp
-# )
+# Header-only HTTP(S) server. OpenSSL is required: the service runs behind
+# mutual TLS, and the peer certificate CN is the caller identity.
+set(HTTPLIB_REQUIRE_OPENSSL ON CACHE BOOL "" FORCE)
+set(HTTPLIB_INSTALL OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.62.0
+)
+FetchContent_MakeAvailable(httplib)
 
-# ── audit library (all logic, no main) ──────────────────────────────────────
-# add_library(audit_lib STATIC
-#     # ${SET_OF_FILE}
-# )
+# ── audit library (all logic, no main) ─────────────────────────────────────
+file(GLOB_RECURSE AUDIT_LIB_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+)
+list(FILTER AUDIT_LIB_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
+
+add_library(audit_lib STATIC
+    ${AUDIT_LIB_SOURCES}
+)
 
 target_include_directories(audit_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -27,14 +42,15 @@ target_include_directories(audit_lib PUBLIC
 target_link_libraries(audit_lib PUBLIC
     OpenSSL::SSL
     OpenSSL::Crypto
-    libpqxx::pqxx
+    PkgConfig::MONGOC
+    httplib::httplib
 )
 
 target_compile_options(audit_lib PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# ── audit executable ─────────────────────────────────────────────────────────
+# ── audit executable ───────────────────────────────────────────────────────
 add_executable(audit
     src/main.cpp
 )
@@ -45,26 +61,35 @@ target_compile_options(audit PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# ── Tests ─────────────────────────────────────────────────────────────────────
+# ── Tests ──────────────────────────────────────────────────────────────────
 enable_testing()
 find_package(GTest REQUIRED)
 
-add_executable(audit_tests
+file(GLOB_RECURSE AUDIT_TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
 )
 
-target_include_directories(audit_tests PRIVATE
-${CMAKE_CURRENT_SOURCE_DIR}/tests
-)
+if(AUDIT_TEST_SOURCES)
+    add_executable(audit_tests
+        ${AUDIT_TEST_SOURCES}
+    )
 
-target_link_libraries(audit_tests PRIVATE
-audit_lib
-GTest::gtest
-GTest::gmock
-GTest::gtest_main
-)
+    target_include_directories(audit_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
 
-target_compile_options(audit_tests PRIVATE
--Wall -Wextra -Wpedantic
-)
+    target_link_libraries(audit_tests PRIVATE
+        audit_lib
+        GTest::gtest
+        GTest::gmock
+        GTest::gtest_main
+    )
 
-add_test(NAME audit_tests COMMAND audit_tests)
+    target_compile_options(audit_tests PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+
+    add_test(NAME audit_tests COMMAND audit_tests)
+else()
+    message(STATUS "audit: no sources under tests/ yet — audit_tests not built")
+endif()

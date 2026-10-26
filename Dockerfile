@@ -21,6 +21,9 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     libpq-devel \
     libpqxx-devel \
     postgresql \
+    # MongoDB C driver + BSON (audit service)
+    mongo-c-driver-devel \
+    pkgconf-pkg-config \
     && dnf clean all
 
 

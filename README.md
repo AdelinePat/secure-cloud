@@ -231,6 +231,74 @@ export LIBGL_ALWAYS_SOFTWARE=1
 
 > WSL has no GPU access, so Qt's hardware OpenGL rendering fails. This flag forces software rendering instead.
 
+## Microservices
+
+Each service is a standalone CMake project with the same layout
+(`include/<service>/…`, `src/…`, `tests/…`), built through `secureChat.sh`:
+
+```bash
+./secureChat.sh build audit    # configure + build
+./secureChat.sh test audit     # build + run audit_tests
+./secureChat.sh run audit      # build + test + run (needs MongoDB for audit)
+./secureChat.sh rebuild audit  # clean build
+```
+
+The same commands work for `auth`, `file`, `messaging` and `gateway`, or omit
+the service name to run them for all of them.
+
+### Audit service
+
+- Stores append-only, hash-chained audit events in MongoDB (`auditLogs`).
+- Speaks HTTPS + mutual TLS to other services only (not exposed by the gateway).
+- API contract: [`_Docs/API/Audit_API.md`](_Docs/API/Audit_API.md).
+
+Host dependencies (the Docker image already has them):
+
+```bash
+# Arch / CachyOS
+sudo pacman -S mongo-c-driver gtest
+
+# Fedora
+sudo dnf install mongo-c-driver-devel gtest-devel
+
+# Debian / Ubuntu
+sudo apt install libmongoc-dev libbson-dev libssl-dev libgtest-dev
+```
+
+Run it with the full stack:
+
+```bash
+docker compose up audit-db audit
+```
+
+Or directly on the host (expects MongoDB on `localhost:27017`, no auth, TLS
+off unless configured):
+
+```bash
+./audit/build/bin/audit
+```
+
+Configuration is environment-only; see `audit/src/config/AuditConfig.cpp`.
+The important ones: `MONGO_HOST`/`MONGO_PORT`/`MONGO_DB`/`MONGO_USER`/
+`MONGO_PASSWORD` (or a single `MONGO_URI`), `AUDIT_PORT`, `AUDIT_TLS_ENABLED`,
+`AUDIT_TLS_CERT`/`AUDIT_TLS_KEY`/`AUDIT_TLS_CA`, `AUDIT_ALLOWED_SERVICES`.
+
+The MongoDB integration test is opt-in:
+
+```bash
+AUDIT_TEST_MONGO_URI='mongodb://user:pass@localhost:27017/audit_test?authSource=audit_test' \
+  ./audit/build/bin/audit_tests --gtest_filter='MongoAuditRepositoryTest.*'
+```
+
+### C++ linting
+
+Only the client is built locally, so host clangd has the Qt headers it needs
+and lints `client/` normally. Service code (`auth/`, `file/`, `messaging/`,
+`audit/`) includes headers that only exist in the Docker image (`pqxx`, `bson`),
+so clangd reports them as missing. Build and test services through Docker
+(`./secureChat.sh ...`), or run the editor inside the container (remote
+development) if you want diagnostics for them.
+
 ## Database management
 
 ### DB init run order
