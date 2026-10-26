@@ -111,7 +111,7 @@ cmd_run() {
             local bin
             bin="$(build_dir "$target")/bin/$target"
             title "Running: $target"
-            "$bin"
+            exec "$bin"
             ;;
 
         *)

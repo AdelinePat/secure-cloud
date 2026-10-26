@@ -1,47 +1,46 @@
 cmake_minimum_required(VERSION 3.20)
+
 project(SecureChatGateway LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# ── Dependencies ───────────────────────────────────────────────────────────
+# Dependencies
 find_package(OpenSSL REQUIRED)
+find_package(Boost REQUIRED)
+find_package(Threads REQUIRED)
+find_package(GTest REQUIRED)
 
-# ── gateway library (all logic, no main) ────────────────────────────────────
-# Everything under src/ except main.cpp. This is the actual fix versus your
-# previous file: gateway_lib used to list src/main.cpp as its own source
-# *and* the gateway executable compiled src/main.cpp again — two objects,
-# same `main` symbol, duplicate-symbol error at link time. main.cpp is now
-# exclusive to the executable target below.
-file(GLOB_RECURSE GATEWAY_LIB_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+# Gateway library
+add_library(gateway_lib STATIC
+    src/HttpServer.cpp
+    src/HttpResponse.cpp
+    src/HttpRouter.cpp
+    src/HttpClient.cpp
+    src/ServiceConfig.cpp
 )
-list(FILTER GATEWAY_LIB_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
 
-if(GATEWAY_LIB_SOURCES)
-    add_library(gateway_lib STATIC
-        ${GATEWAY_LIB_SOURCES}
-    )
+target_include_directories(gateway_lib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${Boost_INCLUDE_DIRS}
+)
 
-    target_include_directories(gateway_lib PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
+target_link_libraries(gateway_lib PUBLIC
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    Threads::Threads
+)
 
-    target_link_libraries(gateway_lib PUBLIC
-        OpenSSL::SSL
-        OpenSSL::Crypto
-    )
+target_compile_options(gateway_lib PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
 
-    target_compile_options(gateway_lib PRIVATE
-        -Wall -Wextra -Wpedantic
-    )
-else()
-    message(STATUS "gateway: no sources under src/ yet (besides main.cpp) — gateway_lib not built")
-endif()
-
-# ── gateway executable ───────────────────────────────────────────────────────
+# Gateway executable
 add_executable(gateway
     src/main.cpp
 )
@@ -55,41 +54,36 @@ if(TARGET gateway_lib)
 endif()
 
 target_compile_options(gateway PRIVATE
-    -Wall -Wextra -Wpedantic
+    -Wall
+    -Wextra
+    -Wpedantic
 )
 
-# ── Tests ─────────────────────────────────────────────────────────────────────
+# Tests
 enable_testing()
-find_package(GTest REQUIRED)
 
-file(GLOB_RECURSE GATEWAY_TEST_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
+add_executable(gateway_tests
+    tests/test_HttpServer.cpp
+    tests/test_HttpResponse.cpp
+    tests/test_HttpRouter.cpp
+    tests/test_HttpClient.cpp
+    tests/test_ServiceConfig.cpp
 )
 
-if(GATEWAY_TEST_SOURCES)
-    add_executable(gateway_tests
-        ${GATEWAY_TEST_SOURCES}
-    )
+target_link_libraries(gateway_tests PRIVATE
+    gateway_lib
+    GTest::gtest
+    GTest::gmock
+    GTest::gtest_main
+)
 
-    target_include_directories(gateway_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    )
+target_compile_options(gateway_tests PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
 
-    if(TARGET gateway_lib)
-        target_link_libraries(gateway_tests PRIVATE gateway_lib)
-    endif()
-
-    target_link_libraries(gateway_tests PRIVATE
-        GTest::gtest
-        GTest::gmock
-        GTest::gtest_main
-    )
-
-    target_compile_options(gateway_tests PRIVATE
-        -Wall -Wextra -Wpedantic
-    )
-
-    add_test(NAME gateway_tests COMMAND gateway_tests)
-else()
-    message(STATUS "gateway: no sources under tests/ yet — gateway_tests not built")
-endif()
+add_test(
+    NAME gateway_tests
+    COMMAND gateway_tests
+)
