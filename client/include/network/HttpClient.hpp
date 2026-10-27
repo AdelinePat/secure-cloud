@@ -22,6 +22,9 @@ class HttpClient : public QObject {
   QNetworkReply* sendMessage(const QString& conversationId, const QString& jwt,
                              const dto::SendMessageRequest& request);
 
+  // Create a group conversation through the Gateway.
+  QNetworkReply* createConversation(const QString& jwt, const QString& name);
+
  private:
   QUrl baseUrl_;
   QNetworkAccessManager networkManager_;

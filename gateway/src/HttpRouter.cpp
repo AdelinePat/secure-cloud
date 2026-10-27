@@ -122,6 +122,55 @@ http::response<http::string_body> HttpRouter::route(
     }
   }
 
+  // Proxy conversation creation requests to Messaging.
+  if (request.target() == "/messaging/conversations") {
+    if (request.method() != http::verb::post) {
+      http::response<http::string_body> response{
+          http::status::method_not_allowed, request.version()};
+
+      response.set(http::field::content_type, "application/json");
+      response.set(http::field::allow, "POST");
+      response.body() = R"({"error":"METHOD_NOT_ALLOWED"})";
+      response.prepare_payload();
+
+      return response;
+    }
+
+    const char* messagingHost = std::getenv("MESSAGING_HOST");
+    const char* messagingPort = std::getenv("MESSAGING_PORT");
+
+    const std::string host = messagingHost ? messagingHost : "messaging";
+    const std::uint16_t port =
+        messagingPort ? static_cast<std::uint16_t>(std::stoi(messagingPort))
+                      : 8082;
+
+    // Copy the request to preserve its body and Authorization header.
+    http::request<http::string_body> messagingRequest = request;
+
+    // Rewrite the public path to the Messaging internal endpoint.
+    messagingRequest.target("/conversations");
+    messagingRequest.set(http::field::host, host);
+    messagingRequest.keep_alive(false);
+
+    try {
+      return httpClient_.send(host, port, messagingRequest);
+
+    } catch (const std::exception& exception) {
+      // Log the upstream error without exposing internal details.
+      std::cerr << "Messaging upstream error: " << exception.what() << '\n';
+
+      http::response<http::string_body> response{http::status::bad_gateway,
+                                                 request.version()};
+
+      response.set(http::field::content_type, "application/json");
+      response.body() = R"({"error":"MESSAGING_SERVICE_UNAVAILABLE"})";
+      response.keep_alive(false);
+      response.prepare_payload();
+
+      return response;
+    }
+  }
+
   // Route 3: Proxy Auth login and refresh requests.
   if (request.target() == "/auth/login" ||
       request.target() == "/auth/refresh") {

@@ -106,11 +106,13 @@ add_library(securechat_network
     src/network/HttpClient.cpp
     src/network/SendMessageResultMapper.cpp
     src/network/MessageService.cpp
+    src/network/ConversationService.cpp
     src/ui/MessageStatusMapper.cpp
 
     include/ui/MessageStatusMapper.hpp
     include/ui/MessageStatus.hpp
     include/network/MessageService.hpp
+    include/network/ConversationService.hpp
     include/network/HttpClient.hpp
 )
 
@@ -366,4 +368,28 @@ set_target_properties(test_MessageStatusMapper PROPERTIES
 add_test(
     NAME MessageStatusMapperTests
     COMMAND test_MessageStatusMapper
+)
+
+# --------------------------------------------------
+# ConversationService tests
+# --------------------------------------------------
+
+add_executable(test_ConversationService
+    tests/network/test_ConversationService.cpp
+)
+
+set_target_properties(test_ConversationService PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_ConversationService
+    PRIVATE
+        securechat_network
+        Qt6::Test
+        Qt6::Network
+)
+
+add_test(
+    NAME ConversationServiceTests
+    COMMAND test_ConversationService
 )
