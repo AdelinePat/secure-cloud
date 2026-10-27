@@ -20,15 +20,21 @@ CREATE TABLE IF NOT EXISTS sessions (
   CONSTRAINT fk_session_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid, -- nullable: SET NULL on delete,
+  creator_id uuid,
   type varchar NOT NULL,
   name varchar,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-  CONSTRAINT fk_conversations_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  CONSTRAINT fk_conversations_creator
+    FOREIGN KEY (creator_id)
+    REFERENCES users(id)
+    ON DELETE SET NULL,
+
+  CONSTRAINT chk_conversations_type
+    CHECK (type IN ('direct', 'group'))
 );
 
 CREATE TABLE conversation_participants (
