@@ -1,7 +1,10 @@
 #include "network/HttpClient.hpp"
-#include "network/SendMessageRequestCodec.hpp"
 
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkRequest>
+
+#include "network/SendMessageRequestCodec.hpp"
 
 namespace network {
 
@@ -27,6 +30,35 @@ QNetworkReply* HttpClient::sendMessage(const QString& conversationId,
   QByteArray body = QByteArray::fromStdString(serializedRequest);
 
   return networkManager_.post(networkRequest, body);
+}
+
+QNetworkReply* HttpClient::login(const QString& username,
+                                 const QString& password) {
+  QUrl url = baseUrl_;
+  url.setPath("/auth/login");
+
+  QNetworkRequest request(url);
+  request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+  QJsonObject json{{"username", username}, {"password", password}};
+
+  const QByteArray body = QJsonDocument(json).toJson(QJsonDocument::Compact);
+
+  return networkManager_.post(request, body);
+}
+
+QNetworkReply* HttpClient::refreshToken(const QString& refreshToken) {
+  QUrl url = baseUrl_;
+  url.setPath("/auth/refresh");
+
+  QNetworkRequest request(url);
+  request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+  QJsonObject json{{"refresh_token", refreshToken}};
+
+  const QByteArray body = QJsonDocument(json).toJson(QJsonDocument::Compact);
+
+  return networkManager_.post(request, body);
 }
 
 }  // namespace network
