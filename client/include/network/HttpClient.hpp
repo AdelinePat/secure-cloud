@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QObject>
+#include <QString>
+#include <QUrl>
 
 #include "network/dto/SendMessageRequest.hpp"
 
@@ -12,11 +15,12 @@ class HttpClient : public QObject {
 
  public:
   explicit HttpClient(const QUrl& baseUrl, QObject* parent = nullptr);
+  QNetworkReply* login(const QString& username, const QString& password);
 
-  QNetworkReply* sendMessage(
-      const QString& conversationId,
-      const QString& jwt,
-      const dto::SendMessageRequest& request);
+  QNetworkReply* refreshToken(const QString& refreshToken);
+
+  QNetworkReply* sendMessage(const QString& conversationId, const QString& jwt,
+                             const dto::SendMessageRequest& request);
 
  private:
   QUrl baseUrl_;
