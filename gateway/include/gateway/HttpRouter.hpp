@@ -2,7 +2,7 @@
 
 #include <boost/beast/http.hpp>
 
-#include "gateway/HttpClient.hpp"
+#include "gateway/IHttpClient.hpp"
 
 namespace gateway {
 
@@ -10,12 +10,12 @@ namespace http = boost::beast::http;
 
 class HttpRouter {
  public:
-  explicit HttpRouter(HttpClient& httpClient);
+  explicit HttpRouter(IHttpClient& httpClient);
   http::response<http::string_body> route(
       const http::request<http::string_body>& request);
 
  private:
-  HttpClient& httpClient_;
+  IHttpClient& httpClient_;
 };
 
 }  // namespace gateway

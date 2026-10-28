@@ -4,16 +4,18 @@
 #include <cstdint>
 #include <string>
 
+#include "gateway/IHttpClient.hpp"
+
 namespace gateway {
 
 namespace http = boost::beast::http;
 
-class HttpClient {
+class HttpClient : public IHttpClient {
  public:
-  // Send an HTTP request to an internal microservice
+  // Send an HTTP request to an internal microservice.
   http::response<http::string_body> send(
       const std::string& host, std::uint16_t port,
-      const http::request<http::string_body>& request);
+      const http::request<http::string_body>& request) override;
 };
 
 }  // namespace gateway

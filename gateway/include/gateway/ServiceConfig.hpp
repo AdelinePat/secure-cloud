@@ -13,6 +13,7 @@ struct ServiceEndpoint {
 class ServiceConfig {
  public:
   static ServiceEndpoint auth();
+  static ServiceEndpoint messaging();
 };
 
 }  // namespace gateway

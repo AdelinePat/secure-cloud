@@ -13,6 +13,8 @@ services:
       GATEWAY_PORT: ${GATEWAY_PORT}
       AUTH_HOST: auth
       AUTH_PORT: ${AUTH_PORT}
+      MESSAGING_HOST: messaging
+      MESSAGING_PORT: ${MESSAGING_PORT}
     ports:
       - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     build:

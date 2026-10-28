@@ -32,3 +32,27 @@ TEST(ServiceConfigTests, ThrowsWhenAuthPortIsInvalid) {
 
   EXPECT_THROW(gateway::ServiceConfig::auth(), std::runtime_error);
 }
+
+TEST(ServiceConfigTests, ReturnsValidMessagingConfiguration) {
+  setenv("MESSAGING_HOST", "messaging", 1);
+  setenv("MESSAGING_PORT", "8082", 1);
+
+  const auto endpoint = gateway::ServiceConfig::messaging();
+
+  EXPECT_EQ(endpoint.host, "messaging");
+  EXPECT_EQ(endpoint.port, 8082);
+}
+
+TEST(ServiceConfigTests, ThrowsWhenMessagingHostIsMissing) {
+  unsetenv("MESSAGING_HOST");
+  setenv("MESSAGING_PORT", "8082", 1);
+
+  EXPECT_THROW(gateway::ServiceConfig::messaging(), std::runtime_error);
+}
+
+TEST(ServiceConfigTests, ThrowsWhenMessagingPortIsInvalid) {
+  setenv("MESSAGING_HOST", "messaging", 1);
+  setenv("MESSAGING_PORT", "not-a-port", 1);
+
+  EXPECT_THROW(gateway::ServiceConfig::messaging(), std::runtime_error);
+}
