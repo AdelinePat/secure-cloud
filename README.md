@@ -246,6 +246,51 @@ Each service is a standalone CMake project with the same layout
 The same commands work for `auth`, `file`, `messaging` and `gateway`, or omit
 the service name to run them for all of them.
 
+### JWT signing keys (auth + messaging)
+
+Auth signs access tokens with an ES256 P-256 key pair stored in the
+`auth-keys` Docker volume. Messaging mounts the same volume read-only and
+verifies tokens with `public.pem`. Generate the pair once before starting the
+stack:
+
+```bash
+docker compose run --rm --no-deps --entrypoint sh auth -c \
+  "openssl ecparam -name prime256v1 -genkey -noout -out /app/auth-keys/private.pem && \
+   openssl ec -in /app/auth-keys/private.pem -pubout -out /app/auth-keys/public.pem"
+```
+
+Do not commit these keys. The auth container must be built once before this
+command works (`docker compose build auth`).
+
+### Messaging service and client
+
+The Qt client talks only to the gateway (`http://127.0.0.1:8080` by default).
+The gateway proxies `/secureChat/conversations...` to the messaging service and
+forwards the bearer token unchanged; messaging verifies the token itself. See
+[`_Docs/API/API_Gateway.md`](_Docs/API/API_Gateway.md) and
+[`_Docs/API/Message_API.md`](_Docs/API/Message_API.md).
+
+Messages are encrypted and decrypted in the client. The service stores only
+base64 `ciphertext` and `nonce`, so it never sees plaintext.
+
+The client can be configured non-interactively with:
+
+```bash
+SECURECHAT_JWT="<access token>" \
+SECURECHAT_PASSPHRASE="<shared conversation passphrase>" \
+SECURECHAT_GATEWAY_URL="http://127.0.0.1:8080" \
+./client/run.sh
+```
+
+`SECURECHAT_CONVERSATION_ID` is optional; when omitted, the client selects the
+first conversation returned by `GET /secureChat/conversations`. The same fields
+are available in the client's Session panel.
+
+> **MVP encryption limitation:** `ConversationKeyStore` derives a conversation
+> key from the conversation id and a shared passphrase with BLAKE2b. This keeps
+> plaintext out of the server, but it is not a real key agreement. Production
+> should use `crypto_kx` for direct chats and an MLS implementation for groups.
+
 ### Audit service
 
 - Stores append-only, hash-chained audit events in MongoDB (`auditLogs`).

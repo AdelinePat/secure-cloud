@@ -10,27 +10,37 @@
 
 `DELETE /secureChat/users/{id}` (protected) >> Auth API DELETE /users/{id}
 
+The gateway forwards the `Authorization: Bearer <jwt>` header unchanged.
+The messaging service verifies the token itself with the auth public key, so
+the gateway never injects a caller identity header.
+
 ## Conversations
 
-`POST /secureChat/conversations` (protected) >> Message API POST /conversation
+`POST /secureChat/conversations` (protected) >> Messaging API POST /conversations
 
-`GET /secureChat/conversations` (protected) >> Message API GET /conversations
+`GET /secureChat/conversations` (protected) >> Messaging API GET /conversations
 
-`GET /secureChat/conversations/{id}` (protected) >> Message API GET /conversation/{id}
+`GET /secureChat/conversations/{id}` (protected) >> Messaging API GET /conversations/{id}
 
-`DELETE /secureChat/conversations/{id}` (protected) >> Message API DELETE /conversations/{id}
+`DELETE /secureChat/conversations/{id}` (protected) >> Messaging API DELETE /conversations/{id}
 
-`DELETE /secureChat/conversations/{id}/{userId}` (protected) >> Message API DELETE /conversations/{id}/{userId}
+`DELETE /secureChat/conversations/{id}/participants/me` (protected) >> Messaging API DELETE /conversations/{id}/participants/me
+
+`DELETE /secureChat/conversations/{id}/participants/{userId}` (protected) >> Messaging API DELETE /conversations/{id}/participants/{userId}
 
 ### Nice to have
 
-`PUT /secureChat/conversations/{id}` (protected) >> Message API PUT /conversations/{id}
+`PUT /secureChat/conversations/{id}` (protected) >> Messaging API PUT /conversations/{id}
 
 ## Messages
 
-`GET /secureChat/conversations/{id}/history?before=&limit=` (protected) >> Message API GET /conversations/{id}/history?before=&limit=
+`GET /secureChat/conversations/{id}/history?before=&limit=` (protected) >> Messaging API GET /conversations/{id}/history?before=&limit=
 
-`POST /secureChat/conversations/{id}/messages` (protected) >> Message API POST /conversations/{id}/messages
+`POST /secureChat/conversations/{id}/messages` (protected) >> Messaging API POST /conversations/{id}/messages
+
+Messages are end-to-end encrypted by the client: the request carries base64
+`ciphertext`/`nonce`, and the messaging service only stores and returns those
+opaque values. It never sees plaintext.
 
 ### Nice to have (what route to use???)
 
