@@ -38,3 +38,12 @@ TEST(HttpRouterTests, RejectsUnsupportedMethod) {
   EXPECT_EQ(response.result(), http::status::method_not_allowed);
   EXPECT_EQ(response[http::field::allow], "GET");
 }
+TEST(HttpRouterTests, ConversationRouteRejectsUnsupportedMethods) {
+  gateway::HttpClient httpClient;
+  gateway::HttpRouter router(httpClient);
+  http::request<http::string_body> request{
+      http::verb::delete_, "/messaging/conversations", 11};
+  const auto response = router.route(request);
+  EXPECT_EQ(response.result(), http::status::method_not_allowed);
+  EXPECT_EQ(response[http::field::allow], "GET, POST");
+}

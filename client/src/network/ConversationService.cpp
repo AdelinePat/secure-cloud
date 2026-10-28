@@ -10,6 +10,33 @@ namespace network {
 ConversationService::ConversationService(const QUrl& baseUrl, QObject* parent)
     : QObject(parent), httpClient_(baseUrl, this) {}
 
+void ConversationService::listConversations(const QString& jwt) {
+  QNetworkReply* reply = httpClient_.listConversations(jwt);
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+      emit conversationsLoadFailed(reply->errorString());
+      return;
+    }
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(reply->readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isArray()) {
+      emit conversationsLoadFailed("Invalid conversations response");
+      return;
+    }
+    for (const auto& value : document.array()) {
+      const auto conversation = value.toObject();
+      if (!value.isObject() || !conversation.value("id").isString() ||
+          conversation.value("id").toString().isEmpty() ||
+          !conversation.value("name").isString()) {
+        emit conversationsLoadFailed("Invalid conversation fields");
+        return;
+      }
+    }
+    emit conversationsLoaded(document.array());
+  });
+}
+
 void ConversationService::createConversation(const QString& jwt,
                                              const QString& name) {
   QNetworkReply* reply = httpClient_.createConversation(jwt, name);

@@ -393,3 +393,14 @@ add_test(
     NAME ConversationServiceTests
     COMMAND test_ConversationService
 )
+# MainWindow authentication and conversation navigation regression tests.
+add_executable(test_MainWindow
+    tests/ui/test_MainWindow.cpp
+    src/ui/MainWindow.cpp
+    include/ui/MainWindow.hpp
+)
+target_link_libraries(test_MainWindow PRIVATE
+    securechat_network Qt6::Widgets Qt6::Test
+)
+add_test(NAME MainWindowTests COMMAND test_MainWindow)
+set_tests_properties(MainWindowTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

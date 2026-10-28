@@ -2,6 +2,7 @@
 #include <boost/beast.hpp>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <pqxx/pqxx>
 #include <stdexcept>
@@ -168,6 +169,34 @@ int main() {
           }
         }
 
+      } else if (request.method() == http::verb::get &&
+                 request.target() == "/conversations") {
+        const auto authorization = request[http::field::authorization];
+        const std::string value(authorization.data(), authorization.size());
+        const std::string prefix = "Bearer ";
+        const auto subject = value.compare(0, prefix.size(), prefix) == 0
+                                 ? jwtVerifier.verify(value.substr(prefix.size()))
+                                 : std::nullopt;
+        if (!subject.has_value()) {
+          response.result(http::status::unauthorized);
+          response.body() = R"({"error":"UNAUTHORIZED"})";
+        } else {
+          try {
+            auto conversations = nlohmann::json::array();
+            // Scope the list to the authenticated user's memberships.
+            for (const auto& conversation : conversationRepository.listForUser(*subject)) {
+              conversations.push_back({{"id", conversation.id},
+                                       {"type", conversation.type},
+                                       {"name", conversation.name.value_or("")}});
+            }
+            response.result(http::status::ok);
+            response.body() = conversations.dump();
+          } catch (const std::exception& e) {
+            std::cerr << "Conversation listing error: " << e.what() << std::endl;
+            response.result(http::status::internal_server_error);
+            response.body() = R"({"error":"INTERNAL_ERROR"})";
+          }
+        }
       } else {
         response.result(http::status::not_found);
         response.body() = R"({"error":"Not found"})";

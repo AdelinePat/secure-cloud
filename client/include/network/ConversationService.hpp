@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QJsonArray>
 #include <QString>
 #include <QUrl>
 
@@ -14,6 +15,8 @@ class ConversationService : public QObject {
  public:
   explicit ConversationService(const QUrl& baseUrl, QObject* parent = nullptr);
 
+  void listConversations(const QString& jwt);
+
   // Create a group conversation.
   void createConversation(const QString& jwt, const QString& name);
 
@@ -23,6 +26,8 @@ class ConversationService : public QObject {
 
   // Emitted when conversation creation fails.
   void conversationCreationFailed(const QString& error);
+  void conversationsLoaded(const QJsonArray& conversations);
+  void conversationsLoadFailed(const QString& error);
 
  private:
   HttpClient httpClient_;

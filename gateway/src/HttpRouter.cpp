@@ -122,14 +122,15 @@ http::response<http::string_body> HttpRouter::route(
     }
   }
 
-  // Proxy conversation creation requests to Messaging.
+  // Proxy conversation creation and listing requests to Messaging.
   if (request.target() == "/messaging/conversations") {
-    if (request.method() != http::verb::post) {
+    if (request.method() != http::verb::post &&
+        request.method() != http::verb::get) {
       http::response<http::string_body> response{
           http::status::method_not_allowed, request.version()};
 
       response.set(http::field::content_type, "application/json");
-      response.set(http::field::allow, "POST");
+      response.set(http::field::allow, "GET, POST");
       response.body() = R"({"error":"METHOD_NOT_ALLOWED"})";
       response.prepare_payload();
 
