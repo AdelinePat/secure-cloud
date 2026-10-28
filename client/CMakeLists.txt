@@ -58,9 +58,12 @@ qt_standard_project_setup()
 # --------------------------------------------------
 
 add_library(securechat_crypto
+    src/crypto/ConversationKeyStore.cpp
     src/crypto/KeyManager.cpp
     src/crypto/MessageCrypto.cpp
     src/crypto/MessageSerializer.cpp
+
+    include/crypto/ConversationKeyStore.hpp
 )
 
 set_target_properties(securechat_crypto PROPERTIES
@@ -91,6 +94,7 @@ target_include_directories(securechat_crypto PUBLIC
 
 target_link_libraries(securechat_crypto
     PUBLIC
+        Qt6::Core
         sodium
 )
 
@@ -423,6 +427,27 @@ add_test(
     COMMAND test_JwtPayload
 )
 
+# --------------------------------------------------
+# ConversationKeyStore tests
+# --------------------------------------------------
+
+add_executable(test_ConversationKeyStore
+    tests/crypto/test_ConversationKeyStore.cpp
+)
+
+set_target_properties(test_ConversationKeyStore PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_ConversationKeyStore PRIVATE
+    securechat_crypto
+    Qt6::Test
+)
+
+add_test(
+    NAME ConversationKeyStoreTests
+    COMMAND test_ConversationKeyStore
+)
 
 # --------------------------------------------------
 # MessageStatusMapper tests
