@@ -8,6 +8,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QUrl>
+#include <QUrlQuery>
 
 #include "network/HttpClient.hpp"
 #include "network/dto/SendMessageRequest.hpp"
@@ -19,6 +21,7 @@ class TestHttpClient : public QObject {
   void sendMessage_sendsPostRequest();
   void sendMessage_handlesUnauthorized();
   void sendMessage_handlesConnectionRefused();
+  void getHistory_encodesCursorQuery();
 };
 
 void TestHttpClient::sendMessage_sendsPostRequest() {
@@ -310,6 +313,81 @@ QVERIFY(
 );
 
 reply->deleteLater();
+}
+
+void TestHttpClient::getHistory_encodesCursorQuery()
+{
+    QTcpServer server;
+
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    QUrl baseUrl;
+    baseUrl.setScheme("http");
+    baseUrl.setHost("127.0.0.1");
+    baseUrl.setPort(server.serverPort());
+
+    network::HttpClient httpClient(baseUrl);
+
+    const QString cursor =
+        "2026-09-02 14:32:01+00|aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
+
+    QNetworkReply* reply =
+        httpClient.getHistory("fake-jwt-token", "conversation-123", cursor, 25);
+
+    QVERIFY(reply != nullptr);
+
+    if (!server.hasPendingConnections()) {
+        QVERIFY(connectionSpy.wait(3000));
+    }
+
+    QTcpSocket* socket = server.nextPendingConnection();
+
+    QVERIFY(socket != nullptr);
+
+    QSignalSpy readyReadSpy(socket, &QTcpSocket::readyRead);
+
+    if (socket->bytesAvailable() == 0) {
+        QVERIFY(readyReadSpy.wait(3000));
+    }
+
+    const QByteArray request = socket->readAll();
+
+    const QList<QByteArray> requestLine =
+        request.left(request.indexOf("\r\n")).split(' ');
+
+    QVERIFY(requestLine.size() >= 2);
+
+    const QByteArray target = requestLine.at(1);
+
+    QVERIFY(target.startsWith(
+        "/secureChat/conversations/conversation-123/history?"));
+
+    const QUrl url(QStringLiteral("http://127.0.0.1") +
+                   QString::fromUtf8(target));
+    const QUrlQuery query(url);
+
+    QCOMPARE(query.queryItemValue("before", QUrl::FullyDecoded), cursor);
+    QCOMPARE(query.queryItemValue("limit", QUrl::FullyDecoded),
+             QString("25"));
+
+    const QByteArray responseBody =
+        R"({"messages":[],"next_cursor":null})";
+
+    const QByteArray response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: " +
+        QByteArray::number(responseBody.size()) +
+        "\r\nConnection: close\r\n\r\n" + responseBody;
+
+    socket->write(response);
+    socket->flush();
+
+    QTRY_VERIFY_WITH_TIMEOUT(reply->isFinished(), 10000);
+
+    reply->deleteLater();
 }
 
 QTEST_MAIN(TestHttpClient)

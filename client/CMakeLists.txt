@@ -101,6 +101,10 @@ target_link_libraries(client
 )
 
 add_library(securechat_network
+    src/network/ApiResultMapper.cpp
+    src/network/ConversationCodec.cpp
+    src/network/HistoryCodec.cpp
+    src/network/JwtPayload.cpp
     src/network/MessageCodec.cpp
     src/network/SendMessageRequestCodec.cpp
     src/network/HttpClient.cpp
@@ -108,6 +112,13 @@ add_library(securechat_network
     src/network/MessageService.cpp
     src/ui/MessageStatusMapper.cpp
 
+    include/network/ApiResultMapper.hpp
+    include/network/ConversationCodec.hpp
+    include/network/HistoryCodec.hpp
+    include/network/JwtPayload.hpp
+    include/network/dto/ApiResult.hpp
+    include/network/dto/Conversation.hpp
+    include/network/dto/History.hpp
     include/ui/MessageStatusMapper.hpp
     include/ui/MessageStatus.hpp
     include/network/MessageService.hpp
@@ -345,6 +356,73 @@ add_test(
     NAME MessageServiceTests
     COMMAND test_MessageService
 )
+
+# --------------------------------------------------
+# ConversationCodec tests
+# --------------------------------------------------
+
+add_executable(test_ConversationCodec
+    tests/network/test_ConversationCodec.cpp
+)
+
+set_target_properties(test_ConversationCodec PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_ConversationCodec PRIVATE
+    securechat_network
+    Qt6::Test
+)
+
+add_test(
+    NAME ConversationCodecTests
+    COMMAND test_ConversationCodec
+)
+
+# --------------------------------------------------
+# HistoryCodec tests
+# --------------------------------------------------
+
+add_executable(test_HistoryCodec
+    tests/network/test_HistoryCodec.cpp
+)
+
+set_target_properties(test_HistoryCodec PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_HistoryCodec PRIVATE
+    securechat_network
+    Qt6::Test
+)
+
+add_test(
+    NAME HistoryCodecTests
+    COMMAND test_HistoryCodec
+)
+
+# --------------------------------------------------
+# JwtPayload tests
+# --------------------------------------------------
+
+add_executable(test_JwtPayload
+    tests/network/test_JwtPayload.cpp
+)
+
+set_target_properties(test_JwtPayload PROPERTIES
+    AUTOMOC ON
+)
+
+target_link_libraries(test_JwtPayload PRIVATE
+    securechat_network
+    Qt6::Test
+)
+
+add_test(
+    NAME JwtPayloadTests
+    COMMAND test_JwtPayload
+)
+
 
 # --------------------------------------------------
 # MessageStatusMapper tests

@@ -5,8 +5,12 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QElapsedTimer>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "network/MessageService.hpp"
+#include "network/dto/Conversation.hpp"
+#include "network/dto/History.hpp"
 #include "network/dto/SendMessageRequest.hpp"
 #include "network/dto/SendMessageResult.hpp"
 
@@ -19,6 +23,8 @@ private slots:
     void emitsNetworkErrorWhenConnectionRefused();
     void emitsServerErrorWhenServerReturns500();
     void handlesConcurrentMessages();
+    void emitsConversationsWhenListSucceeds();
+    void emitsHistoryWhenHistorySucceeds();
 };
 
 void TestMessageService::emitsSuccessWhenServerReturns200()
@@ -531,6 +537,173 @@ QCOMPARE(
 
 QCOMPARE(resultA.httpStatusCode, 500);
 
+}
+
+void TestMessageService::emitsConversationsWhenListSucceeds()
+{
+    QTcpServer server;
+
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    QUrl baseUrl;
+    baseUrl.setScheme("http");
+    baseUrl.setHost("127.0.0.1");
+    baseUrl.setPort(server.serverPort());
+
+    network::MessageService service(baseUrl);
+
+    QSignalSpy conversationsSpy(
+        &service,
+        &network::MessageService::conversationsLoaded
+    );
+
+    QVERIFY(conversationsSpy.isValid());
+
+    QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
+
+    service.listConversations("fake-jwt-token");
+
+    if (!server.hasPendingConnections()) {
+        QVERIFY(connectionSpy.wait(3000));
+    }
+
+    QTcpSocket* socket = server.nextPendingConnection();
+
+    QVERIFY(socket != nullptr);
+
+    QSignalSpy readyReadSpy(socket, &QTcpSocket::readyRead);
+
+    if (socket->bytesAvailable() == 0) {
+        QVERIFY(readyReadSpy.wait(3000));
+    }
+
+    const QByteArray request = socket->readAll();
+
+    QVERIFY(request.startsWith(
+        "GET /secureChat/conversations HTTP/1.1"));
+    QVERIFY(request.contains("Authorization: Bearer fake-jwt-token"));
+
+    const QByteArray responseBody = R"({
+        "conversations": [{
+            "conversation_id": "conversation-1",
+            "type": "direct",
+            "name": null,
+            "participant_ids": ["user-1", "user-2"],
+            "last_message_at": null,
+            "unread_count": 2
+        }]
+    })";
+
+    const QByteArray response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: " +
+        QByteArray::number(responseBody.size()) +
+        "\r\nConnection: close\r\n\r\n" + responseBody;
+
+    QCOMPARE(socket->write(response),
+             static_cast<qint64>(response.size()));
+    socket->flush();
+
+    QTRY_COMPARE_WITH_TIMEOUT(conversationsSpy.count(), 1, 10000);
+
+    const QList<QVariant> arguments = conversationsSpy.takeFirst();
+
+    const auto result =
+        arguments.at(0).value<network::dto::ConversationsResult>();
+
+    QCOMPARE(result.meta.status,
+             network::dto::RequestStatus::Success);
+    QCOMPARE(result.conversations.size(), 1);
+    QCOMPARE(result.conversations.first().id,
+             QString("conversation-1"));
+    QCOMPARE(result.conversations.first().unreadCount, 2);
+}
+
+void TestMessageService::emitsHistoryWhenHistorySucceeds()
+{
+    QTcpServer server;
+
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+    QUrl baseUrl;
+    baseUrl.setScheme("http");
+    baseUrl.setHost("127.0.0.1");
+    baseUrl.setPort(server.serverPort());
+
+    network::MessageService service(baseUrl);
+
+    QSignalSpy historySpy(
+        &service,
+        &network::MessageService::historyLoaded
+    );
+
+    QVERIFY(historySpy.isValid());
+
+    QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
+
+    service.loadHistory("fake-jwt-token", "conversation-1", {}, 10);
+
+    if (!server.hasPendingConnections()) {
+        QVERIFY(connectionSpy.wait(3000));
+    }
+
+    QTcpSocket* socket = server.nextPendingConnection();
+
+    QVERIFY(socket != nullptr);
+
+    QSignalSpy readyReadSpy(socket, &QTcpSocket::readyRead);
+
+    if (socket->bytesAvailable() == 0) {
+        QVERIFY(readyReadSpy.wait(3000));
+    }
+
+    const QByteArray request = socket->readAll();
+
+    QVERIFY(request.startsWith(
+        "GET /secureChat/conversations/conversation-1/history?limit=10 "
+        "HTTP/1.1"));
+
+    const QByteArray responseBody = R"({
+        "messages": [{
+            "message_id": "message-1",
+            "userId": "user-1",
+            "ciphertext": "AQIDBA==",
+            "nonce": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+            "encryption_version": 1,
+            "server_timestamp": "2026-09-02T14:32:01Z",
+            "attachments": []
+        }],
+        "next_cursor": null
+    })";
+
+    const QByteArray response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: " +
+        QByteArray::number(responseBody.size()) +
+        "\r\nConnection: close\r\n\r\n" + responseBody;
+
+    QCOMPARE(socket->write(response),
+             static_cast<qint64>(response.size()));
+    socket->flush();
+
+    QTRY_COMPARE_WITH_TIMEOUT(historySpy.count(), 1, 10000);
+
+    const QList<QVariant> arguments = historySpy.takeFirst();
+
+    QCOMPARE(arguments.at(0).toString(), QString("conversation-1"));
+
+    const auto result =
+        arguments.at(1).value<network::dto::HistoryResult>();
+
+    QCOMPARE(result.meta.status,
+             network::dto::RequestStatus::Success);
+    QCOMPARE(result.page.messages.size(), 1);
+    QCOMPARE(result.page.messages.first().messageId,
+             QString("message-1"));
+    QCOMPARE(result.page.messages.first().userId, QString("user-1"));
+    QVERIFY(!result.page.hasNext);
 }
 
 QTEST_MAIN(TestMessageService)

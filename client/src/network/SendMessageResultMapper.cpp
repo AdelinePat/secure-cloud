@@ -1,40 +1,39 @@
 #include "network/SendMessageResultMapper.hpp"
 
+#include "network/ApiResultMapper.hpp"
+
 namespace network {
 
 dto::SendMessageResult SendMessageResultMapper::fromReply(
     QNetworkReply* reply) {
+  const dto::ApiResult api = ApiResultMapper::fromReply(reply);
 
-  dto::SendMessageResult result{};
+  dto::SendMessageResult result;
+  result.httpStatusCode = api.httpStatusCode;
+  result.errorMessage = api.errorMessage;
 
-result.status = dto::SendMessageStatus::UnknownError;
-result.errorMessage = reply->errorString();
-  result.httpStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-
-  if (reply->error() == QNetworkReply::NoError &&
-    result.httpStatusCode >= 200 &&
-    result.httpStatusCode < 300) {
-
-    result.status = dto::SendMessageStatus::Success;
-    result.errorMessage.clear();
-}
-
-if (result.httpStatusCode == 401) {
-    result.status = dto::SendMessageStatus::Unauthorized;
-    result.errorMessage = reply->errorString();
-}
-
-if (reply->error() == QNetworkReply::ConnectionRefusedError) {
-    result.status = dto::SendMessageStatus::NetworkError;
-    result.errorMessage = reply->errorString();
-}
-
-if (result.httpStatusCode >= 500 &&
-    result.httpStatusCode < 600) {
-
-    result.status = dto::SendMessageStatus::ServerError;
-    result.errorMessage = reply->errorString();
-}
+  switch (api.status) {
+    case dto::RequestStatus::Success:
+      result.status = dto::SendMessageStatus::Success;
+      result.errorMessage.clear();
+      break;
+    case dto::RequestStatus::Unauthorized:
+      result.status = dto::SendMessageStatus::Unauthorized;
+      break;
+    case dto::RequestStatus::NetworkError:
+      result.status = dto::SendMessageStatus::NetworkError;
+      break;
+    case dto::RequestStatus::ServerError:
+      result.status = dto::SendMessageStatus::ServerError;
+      break;
+    case dto::RequestStatus::Forbidden:
+    case dto::RequestStatus::BadRequest:
+    case dto::RequestStatus::NotFound:
+    case dto::RequestStatus::Conflict:
+    case dto::RequestStatus::UnknownError:
+      result.status = dto::SendMessageStatus::UnknownError;
+      break;
+  }
 
   return result;
 }
