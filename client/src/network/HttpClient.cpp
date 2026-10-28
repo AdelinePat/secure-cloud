@@ -61,4 +61,32 @@ QNetworkReply* HttpClient::refreshToken(const QString& refreshToken) {
   return networkManager_.post(request, body);
 }
 
+QNetworkReply* HttpClient::listConversations(const QString& jwt) {
+  QUrl url = baseUrl_;
+  url.setPath("/messaging/conversations");
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+  return networkManager_.get(request);
+}
+
+QNetworkReply* HttpClient::createConversation(const QString& jwt,
+                                              const QString& name) {
+  QUrl url = baseUrl_;
+  url.setPath("/messaging/conversations");
+
+  QNetworkRequest networkRequest(url);
+
+  networkRequest.setHeader(QNetworkRequest::ContentTypeHeader,
+                           "application/json");
+
+  networkRequest.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+
+  // Build the conversation creation payload.
+  QJsonObject json{{"type", "group"}, {"name", name}};
+
+  const QByteArray body = QJsonDocument(json).toJson(QJsonDocument::Compact);
+
+  return networkManager_.post(networkRequest, body);
+}
+
 }  // namespace network
