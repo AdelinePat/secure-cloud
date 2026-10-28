@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iomanip>
 #include <random>
 #include <sstream>
 #include <unordered_map>
@@ -35,6 +36,24 @@ class InMemoryConversationRepository : public IConversationRepository {
       if (isParticipant) result.push_back(conv);
     }
     return result;
+  }
+
+  std::optional<domain::Conversation> findDirectBetween(
+      const std::string& firstUserId,
+      const std::string& secondUserId) override {
+    for (const auto& [id, conv] : conversationsById_) {
+      if (conv.type != "direct") continue;
+
+      const bool hasFirst = std::any_of(
+          conv.participants.begin(), conv.participants.end(),
+          [&](const domain::Participant& p) { return p.user_id == firstUserId; });
+      const bool hasSecond = std::any_of(
+          conv.participants.begin(), conv.participants.end(),
+          [&](const domain::Participant& p) { return p.user_id == secondUserId; });
+
+      if (hasFirst && hasSecond) return conv;
+    }
+    return std::nullopt;
   }
 
   bool remove(const std::string& id) override {
@@ -76,13 +95,42 @@ class InMemoryConversationRepository : public IConversationRepository {
     return std::nullopt;
   }
 
+  std::size_t countParticipants(const std::string& conversationId) override {
+    auto it = conversationsById_.find(conversationId);
+    if (it == conversationsById_.end()) return 0;
+    return it->second.participants.size();
+  }
+
+  bool promoteToAdmin(const std::string& conversationId,
+                      const std::string& userId) override {
+    auto it = conversationsById_.find(conversationId);
+    if (it == conversationsById_.end()) return false;
+
+    for (auto& participant : it->second.participants) {
+      if (participant.user_id == userId) {
+        participant.role = "admin";
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void touch(const std::string& conversationId) override {
+    auto it = conversationsById_.find(conversationId);
+    if (it == conversationsById_.end()) return;
+    it->second.updated_at = "1970-01-01T00:00:01Z";
+  }
+
+  void markRead(const std::string&, const std::string&) override {}
+
  private:
   std::unordered_map<std::string, domain::Conversation> conversationsById_;
 
   static std::string generateId() {
-    static std::mt19937_64 rng{std::random_device{}()};
+    static int counter = 0;
     std::ostringstream oss;
-    oss << std::hex << rng();
+    oss << "00000000-0000-4000-8000-" << std::setw(12) << std::setfill('0')
+        << counter++;
     return oss.str();
   }
 };

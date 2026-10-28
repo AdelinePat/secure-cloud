@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS conversation_participants (
   user_id uuid NOT NULL,
   role varchar NOT NULL,
   joined_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_read_at timestamptz, -- used to compute unread_count
 
   PRIMARY KEY (conversation_id, user_id),
 
@@ -43,11 +44,21 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS message_attachments (
   message_id uuid NOT NULL,
   file_id uuid NOT NULL,
+  size_bytes bigint NOT NULL DEFAULT 0,
+  checksum_sha256 varchar,
 
   PRIMARY KEY (message_id, file_id),
 
   CONSTRAINT fk_attachment_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
+
+-- Existing volumes created before these columns were added.
+ALTER TABLE conversation_participants
+  ADD COLUMN IF NOT EXISTS last_read_at timestamptz;
+ALTER TABLE message_attachments
+  ADD COLUMN IF NOT EXISTS size_bytes bigint NOT NULL DEFAULT 0;
+ALTER TABLE message_attachments
+  ADD COLUMN IF NOT EXISTS checksum_sha256 varchar;
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation ON messages (conversation_id, server_timestamp);
 CREATE INDEX IF NOT EXISTS idx_conversation_participants_user ON conversation_participants(user_id);

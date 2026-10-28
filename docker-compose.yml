@@ -78,9 +78,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB_DATA}
+      MESSAGING_PORT: ${MESSAGING_PORT}
+      MESSAGING_JWT_PUBLIC_KEY_PATH: "/app/auth-keys/public.pem"
     depends_on:
       app-db:
         condition: service_healthy
+    expose:
+      - "${MESSAGING_PORT}"
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
@@ -94,6 +98,10 @@ services:
       - type: bind
         source: ./secureChat.sh
         target: /app/secureChat.sh
+      - type: volume
+        source: auth-keys
+        target: /app/auth-keys
+        read_only: true
     command: [ "bash", "./secureChat.sh", "run", "messaging" ]
 
   file:

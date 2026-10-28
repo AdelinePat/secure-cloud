@@ -20,6 +20,10 @@ struct Conversation {
   std::string created_at;
   std::string updated_at;
 
+  // Read-only projections populated by listForUser().
+  std::optional<std::string> last_message_at;
+  int unread_count = 0;
+
   // On create(): the participants to insert (including the creator).
   // On read (findById/listForUser): populated by the store.
   std::vector<Participant> participants;

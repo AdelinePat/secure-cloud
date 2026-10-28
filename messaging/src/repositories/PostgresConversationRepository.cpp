@@ -23,6 +23,19 @@ PostgresConversationRepository::fetchParticipants(
   return participants;
 }
 
+domain::Conversation PostgresConversationRepository::readConversation(
+    const pqxx::row& row) {
+  domain::Conversation conv;
+  conv.id = row["id"].as<std::string>();
+  if (!row["creator_id"].is_null())
+    conv.creator_id = row["creator_id"].as<std::string>();
+  conv.type = row["type"].as<std::string>();
+  if (!row["name"].is_null()) conv.name = row["name"].as<std::string>();
+  conv.created_at = row["created_at"].as<std::string>();
+  conv.updated_at = row["updated_at"].as<std::string>();
+  return conv;
+}
+
 domain::Conversation PostgresConversationRepository::create(
     const domain::Conversation& conversation) {
   pqxx::work txn(conn_);
@@ -33,15 +46,7 @@ domain::Conversation PostgresConversationRepository::create(
       "RETURNING id, creator_id, type, name, created_at::text, updated_at::text",
       conversation.creator_id, conversation.type, conversation.name);
 
-  domain::Conversation stored;
-  stored.id = convRow[0]["id"].as<std::string>();
-  if (!convRow[0]["creator_id"].is_null())
-    stored.creator_id = convRow[0]["creator_id"].as<std::string>();
-  stored.type = convRow[0]["type"].as<std::string>();
-  if (!convRow[0]["name"].is_null())
-    stored.name = convRow[0]["name"].as<std::string>();
-  stored.created_at = convRow[0]["created_at"].as<std::string>();
-  stored.updated_at = convRow[0]["updated_at"].as<std::string>();
+  domain::Conversation stored = readConversation(convRow[0]);
 
   for (const auto& p : conversation.participants) {
     auto pRow = txn.exec_params(
@@ -71,15 +76,7 @@ std::optional<domain::Conversation> PostgresConversationRepository::findById(
     return std::nullopt;
   }
 
-  domain::Conversation conv;
-  conv.id = convRows[0]["id"].as<std::string>();
-  if (!convRows[0]["creator_id"].is_null())
-    conv.creator_id = convRows[0]["creator_id"].as<std::string>();
-  conv.type = convRows[0]["type"].as<std::string>();
-  if (!convRows[0]["name"].is_null())
-    conv.name = convRows[0]["name"].as<std::string>();
-  conv.created_at = convRows[0]["created_at"].as<std::string>();
-  conv.updated_at = convRows[0]["updated_at"].as<std::string>();
+  domain::Conversation conv = readConversation(convRows[0]);
   conv.participants = fetchParticipants(txn, id);
 
   txn.commit();
@@ -94,29 +91,68 @@ std::vector<domain::Conversation> PostgresConversationRepository::listForUser(
   // Fine at MVP scale; if this shows up in profiling later, replace with a
   // single query joining conversation_participants and grouping client-side.
   auto convRows = txn.exec_params(
-      "SELECT c.id, c.creator_id, c.type, c.name, c.created_at::text, c.updated_at::text "
+      "SELECT c.id, c.creator_id, c.type, c.name, c.created_at::text, "
+      "       c.updated_at::text, "
+      "       (SELECT max(m.server_timestamp)::text FROM messages m "
+      "         WHERE m.conversation_id = c.id AND m.deleted_at IS NULL) "
+      "         AS last_message_at, "
+      "       (SELECT count(*) FROM messages m "
+      "         WHERE m.conversation_id = c.id AND m.deleted_at IS NULL "
+      "           AND m.user_id IS DISTINCT FROM cp.user_id "
+      "           AND (cp.last_read_at IS NULL "
+      "                OR m.server_timestamp > cp.last_read_at)) "
+      "         AS unread_count "
       "FROM conversations c "
       "JOIN conversation_participants cp ON cp.conversation_id = c.id "
       "WHERE cp.user_id = $1 "
-      "ORDER BY c.updated_at DESC",
+      // PostgreSQL does not allow a SELECT alias inside an ORDER BY
+      // expression, so repeat the subquery instead of using last_message_at.
+      "ORDER BY COALESCE("
+      "  (SELECT max(m.server_timestamp) FROM messages m "
+      "    WHERE m.conversation_id = c.id AND m.deleted_at IS NULL), "
+      "  c.updated_at) DESC",
       userId);
 
   std::vector<domain::Conversation> result;
   for (const auto& row : convRows) {
-    domain::Conversation conv;
-    conv.id = row["id"].as<std::string>();
-    if (!row["creator_id"].is_null())
-      conv.creator_id = row["creator_id"].as<std::string>();
-    conv.type = row["type"].as<std::string>();
-    if (!row["name"].is_null()) conv.name = row["name"].as<std::string>();
-    conv.created_at = row["created_at"].as<std::string>();
-    conv.updated_at = row["updated_at"].as<std::string>();
+    domain::Conversation conv = readConversation(row);
+    if (!row["last_message_at"].is_null())
+      conv.last_message_at = row["last_message_at"].as<std::string>();
+    conv.unread_count = row["unread_count"].as<int>();
     conv.participants = fetchParticipants(txn, conv.id);
     result.push_back(std::move(conv));
   }
 
   txn.commit();
   return result;
+}
+
+std::optional<domain::Conversation>
+PostgresConversationRepository::findDirectBetween(
+    const std::string& firstUserId, const std::string& secondUserId) {
+  pqxx::work txn(conn_);
+
+  auto rows = txn.exec_params(
+      "SELECT c.id, c.creator_id, c.type, c.name, c.created_at::text, "
+      "       c.updated_at::text "
+      "FROM conversations c "
+      "JOIN conversation_participants p1 "
+      "  ON p1.conversation_id = c.id AND p1.user_id = $1 "
+      "JOIN conversation_participants p2 "
+      "  ON p2.conversation_id = c.id AND p2.user_id = $2 "
+      "WHERE c.type = 'direct' "
+      "LIMIT 1",
+      firstUserId, secondUserId);
+
+  if (rows.empty()) {
+    txn.commit();
+    return std::nullopt;
+  }
+
+  domain::Conversation conv = readConversation(rows[0]);
+  conv.participants = fetchParticipants(txn, conv.id);
+  txn.commit();
+  return conv;
 }
 
 bool PostgresConversationRepository::remove(const std::string& id) {
@@ -161,6 +197,46 @@ std::optional<std::string> PostgresConversationRepository::findRole(
 
   if (result.empty()) return std::nullopt;
   return result[0]["role"].as<std::string>();
+}
+
+std::size_t PostgresConversationRepository::countParticipants(
+    const std::string& conversationId) {
+  pqxx::work txn(conn_);
+  auto result = txn.exec_params(
+      "SELECT count(*)::bigint AS count FROM conversation_participants "
+      "WHERE conversation_id = $1",
+      conversationId);
+  txn.commit();
+  return static_cast<std::size_t>(result[0]["count"].as<long long>());
+}
+
+bool PostgresConversationRepository::promoteToAdmin(
+    const std::string& conversationId, const std::string& userId) {
+  pqxx::work txn(conn_);
+  auto result = txn.exec_params(
+      "UPDATE conversation_participants SET role = 'admin' "
+      "WHERE conversation_id = $1 AND user_id = $2",
+      conversationId, userId);
+  txn.commit();
+  return result.affected_rows() > 0;
+}
+
+void PostgresConversationRepository::touch(const std::string& conversationId) {
+  pqxx::work txn(conn_);
+  txn.exec_params(
+      "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+      conversationId);
+  txn.commit();
+}
+
+void PostgresConversationRepository::markRead(const std::string& conversationId,
+                                              const std::string& userId) {
+  pqxx::work txn(conn_);
+  txn.exec_params(
+      "UPDATE conversation_participants SET last_read_at = CURRENT_TIMESTAMP "
+      "WHERE conversation_id = $1 AND user_id = $2",
+      conversationId, userId);
+  txn.commit();
 }
 
 }  // namespace messaging::repositories

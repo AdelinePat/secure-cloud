@@ -16,6 +16,9 @@ class PostgresMessageRepository : public IMessageRepository {
 
  private:
   pqxx::connection& conn_;
+
+  std::vector<domain::Attachment> fetchAttachments(
+      pqxx::work& txn, const std::string& messageId);
 };
 
 }  // namespace messaging::repositories
