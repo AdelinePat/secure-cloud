@@ -16,6 +16,8 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     file \
     # Quality of life
     git \
+    jq \
+    curl \
     openssl \
     openssl-devel \
     # HTTP server dependencies

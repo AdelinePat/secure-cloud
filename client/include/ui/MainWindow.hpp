@@ -54,6 +54,7 @@ class MainWindow : public QMainWindow {
   network::MessageService messageService_;
   network::ConversationService conversationService_;
   QLineEdit* conversationNameInput_;
+  QLineEdit* conversationParticipantsInput_;
   QPushButton* createConversationButton_;
   QString currentConversationId_;
   crypto::SessionKey testSessionKey_{};

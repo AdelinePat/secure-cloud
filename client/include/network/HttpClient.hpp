@@ -4,6 +4,7 @@
 #include <QNetworkReply>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 #include "network/dto/SendMessageRequest.hpp"
@@ -26,7 +27,8 @@ class HttpClient : public QObject {
   const QUrl& baseUrl() const { return baseUrl_; }
 
   // Create a group conversation through the Gateway.
-  QNetworkReply* createConversation(const QString& jwt, const QString& name);
+  QNetworkReply* createConversation(const QString& jwt, const QString& name,
+                                    const QStringList& participants);
 
  private:
   QUrl baseUrl_;

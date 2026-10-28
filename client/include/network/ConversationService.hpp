@@ -1,8 +1,9 @@
 #pragma once
 
-#include <QObject>
 #include <QJsonArray>
+#include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 #include "network/HttpClient.hpp"
@@ -18,7 +19,8 @@ class ConversationService : public QObject {
   void listConversations(const QString& jwt);
 
   // Create a group conversation.
-  void createConversation(const QString& jwt, const QString& name);
+  void createConversation(const QString& jwt, const QString& name,
+                          const QStringList& participants);
 
  signals:
   // Emitted when the conversation is successfully created.

@@ -7,8 +7,8 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QStatusBar>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -64,11 +64,17 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   conversationNameInput_ = new QLineEdit(chatPage_);
   conversationNameInput_->setObjectName("conversationNameInput");
   conversationNameInput_->setPlaceholderText("Conversation name");
+  conversationParticipantsInput_ = new QLineEdit(chatPage_);
+  conversationParticipantsInput_->setObjectName(
+      "conversationParticipantsInput");
+  conversationParticipantsInput_->setPlaceholderText(
+      "Participants (e.g. bob_test, charlie_test)");
   createConversationButton_ = new QPushButton("Create conversation", chatPage_);
   createConversationButton_->setObjectName("createConversationButton");
 
   QHBoxLayout* conversationLayout = new QHBoxLayout();
   conversationLayout->addWidget(conversationNameInput_);
+  conversationLayout->addWidget(conversationParticipantsInput_);
   conversationLayout->addWidget(createConversationButton_);
 
   messageView_ = new QTextEdit(chatPage_);
@@ -90,7 +96,8 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   conversationList_->setMinimumWidth(180);
   conversationTitle_ = new QLabel("Select a conversation", chatPage_);
   conversationTitle_->setTextFormat(Qt::PlainText);
-  reloadConversationsButton_ = new QPushButton("Refresh conversations", chatPage_);
+  reloadConversationsButton_ =
+      new QPushButton("Refresh conversations", chatPage_);
 
   auto* sidebar = new QWidget(chatPage_);
   auto* sidebarLayout = new QVBoxLayout(sidebar);
@@ -115,11 +122,15 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   connect(conversationList_, &QListWidget::currentItemChanged, this,
           [this](QListWidgetItem* current, QListWidgetItem*) {
             if (!currentConversationId_.isEmpty()) {
-              conversationDrafts_[currentConversationId_] = messageInput_->text();
+              conversationDrafts_[currentConversationId_] =
+                  messageInput_->text();
             }
-            currentConversationId_ = current ? current->data(Qt::UserRole).toString() : QString();
-            conversationTitle_->setText(current ? current->text() : "Select a conversation");
-            messageInput_->setText(conversationDrafts_.value(currentConversationId_));
+            currentConversationId_ =
+                current ? current->data(Qt::UserRole).toString() : QString();
+            conversationTitle_->setText(current ? current->text()
+                                                : "Select a conversation");
+            messageInput_->setText(
+                conversationDrafts_.value(currentConversationId_));
             sendButton_->setEnabled(current != nullptr);
             messageInput_->setEnabled(current != nullptr);
             refreshMessages();
@@ -163,52 +174,61 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   connect(conversationNameInput_, &QLineEdit::returnPressed, this,
           &MainWindow::onCreateConversationClicked);
 
-  connect(&conversationService_,
-          &network::ConversationService::conversationCreated, this,
-          [this](const QString& conversationId, const QString& name) {
-            createConversationButton_->setEnabled(true);
-            conversationNameInput_->setEnabled(true);
-            if (accessToken_.isEmpty() || creationSession_ != sessionGeneration_) {
-              return;
-            }
-            addConversation(conversationId, name, true);
-            conversationNameInput_->clear();
-            statusBar()->showMessage("Conversation created: " + name, 5000);
-          });
+  connect(
+      &conversationService_, &network::ConversationService::conversationCreated,
+      this, [this](const QString& conversationId, const QString& name) {
+        createConversationButton_->setEnabled(true);
+        conversationNameInput_->setEnabled(true);
+        conversationParticipantsInput_->setEnabled(true);
+        if (accessToken_.isEmpty() || creationSession_ != sessionGeneration_) {
+          return;
+        }
+        addConversation(conversationId, name, true);
+        conversationNameInput_->clear();
+        conversationParticipantsInput_->clear();
+        statusBar()->showMessage("Conversation created: " + name, 5000);
+      });
 
+  connect(
+      &conversationService_,
+      &network::ConversationService::conversationCreationFailed, this,
+      [this](const QString& error) {
+        createConversationButton_->setEnabled(true);
+        conversationNameInput_->setEnabled(true);
+        conversationParticipantsInput_->setEnabled(true);
+        if (accessToken_.isEmpty() || creationSession_ != sessionGeneration_) {
+          return;
+        }
+        statusBar()->showMessage("Conversation creation failed: " + error);
+      });
+
+  connect(
+      &conversationService_, &network::ConversationService::conversationsLoaded,
+      this, [this](const QJsonArray& conversations) {
+        listingPending_ = false;
+        reloadConversationsButton_->setEnabled(true);
+        if (accessToken_.isEmpty() || listingSession_ != sessionGeneration_) {
+          if (!accessToken_.isEmpty()) loadConversations();
+          return;
+        }
+        for (const auto& value : conversations) {
+          const auto conversation = value.toObject();
+          addConversation(conversation.value("id").toString(),
+                          conversation.value("name").toString(), false);
+        }
+        if (!conversationList_->currentItem() &&
+            conversationList_->count() > 0) {
+          conversationList_->setCurrentRow(0);
+        }
+        statusBar()->showMessage(
+            conversationList_->count() == 0
+                ? "No conversations yet. Create one to begin."
+                : "Conversations loaded",
+            5000);
+      });
   connect(&conversationService_,
-          &network::ConversationService::conversationCreationFailed, this,
+          &network::ConversationService::conversationsLoadFailed, this,
           [this](const QString& error) {
-            createConversationButton_->setEnabled(true);
-            conversationNameInput_->setEnabled(true);
-            if (accessToken_.isEmpty() || creationSession_ != sessionGeneration_) {
-              return;
-            }
-            statusBar()->showMessage("Conversation creation failed: " + error);
-          });
-
-  connect(&conversationService_, &network::ConversationService::conversationsLoaded,
-          this, [this](const QJsonArray& conversations) {
-            listingPending_ = false;
-            reloadConversationsButton_->setEnabled(true);
-            if (accessToken_.isEmpty() || listingSession_ != sessionGeneration_) {
-              if (!accessToken_.isEmpty()) loadConversations();
-              return;
-            }
-            for (const auto& value : conversations) {
-              const auto conversation = value.toObject();
-              addConversation(conversation.value("id").toString(),
-                              conversation.value("name").toString(), false);
-            }
-            if (!conversationList_->currentItem() && conversationList_->count() > 0) {
-              conversationList_->setCurrentRow(0);
-            }
-            statusBar()->showMessage(conversationList_->count() == 0
-                                        ? "No conversations yet. Create one to begin."
-                                        : "Conversations loaded", 5000);
-          });
-  connect(&conversationService_, &network::ConversationService::conversationsLoadFailed,
-          this, [this](const QString& error) {
             listingPending_ = false;
             reloadConversationsButton_->setEnabled(true);
             if (accessToken_.isEmpty()) return;
@@ -227,7 +247,8 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
 }
 
 void MainWindow::onLoginClicked() {
-  if (!loginButton_->isEnabled() || stackedWidget_->currentWidget() != loginPage_) {
+  if (!loginButton_->isEnabled() ||
+      stackedWidget_->currentWidget() != loginPage_) {
     return;
   }
   QString username = usernameInput_->text().trimmed();
@@ -395,10 +416,15 @@ void MainWindow::resetConversations() {
   conversationMessageOrder_.clear();
   conversationDrafts_.clear();
   conversationNameInput_->clear();
+  conversationParticipantsInput_->clear();
+  conversationParticipantsInput_->setEnabled(true);
+  createConversationButton_->setEnabled(true);
+  conversationNameInput_->setEnabled(true);
   statusBar()->clearMessage();
 }
 
-void MainWindow::addConversation(const QString& id, const QString& name, bool select) {
+void MainWindow::addConversation(const QString& id, const QString& name,
+                                 bool select) {
   QListWidgetItem* item = nullptr;
   for (int row = 0; row < conversationList_->count(); ++row) {
     if (conversationList_->item(row)->data(Qt::UserRole).toString() == id) {
@@ -413,7 +439,8 @@ void MainWindow::addConversation(const QString& id, const QString& name, bool se
   item->setText(name.isEmpty() ? "Unnamed conversation" : name);
   item->setToolTip(id);
   if (select) conversationList_->setCurrentItem(item);
-  if (item == conversationList_->currentItem()) conversationTitle_->setText(item->text());
+  if (item == conversationList_->currentItem())
+    conversationTitle_->setText(item->text());
 }
 
 void MainWindow::loadConversations() {
@@ -431,24 +458,45 @@ void MainWindow::onCreateConversationClicked() {
   }
 
   const QString name = conversationNameInput_->text().trimmed();
+
   if (name.isEmpty()) {
     statusBar()->showMessage("A conversation name is required", 5000);
     return;
   }
 
+  QStringList participants;
+
+  const QString input = conversationParticipantsInput_->text();
+
+  for (const QString& username : input.split(',', Qt::SkipEmptyParts)) {
+    const QString trimmed = username.trimmed();
+
+    if (!trimmed.isEmpty() && !participants.contains(trimmed)) {
+      participants.append(trimmed);
+    }
+  }
+
+  if (participants.size() > 100) {
+    statusBar()->showMessage("Maximum 100 participants", 5000);
+    return;
+  }
+
   createConversationButton_->setEnabled(false);
   conversationNameInput_->setEnabled(false);
+  conversationParticipantsInput_->setEnabled(false);
+
   statusBar()->showMessage("Creating conversation...");
 
-  // Read the current access token on every request, including after rotation.
   creationSession_ = sessionGeneration_;
-  conversationService_.createConversation(accessToken_, name);
+
+  conversationService_.createConversation(accessToken_, name, participants);
 }
 
 void MainWindow::onSendClicked() {
   QString message = messageInput_->text().trimmed();
 
-  if (message.isEmpty() || currentConversationId_.isEmpty() || accessToken_.isEmpty()) {
+  if (message.isEmpty() || currentConversationId_.isEmpty() ||
+      accessToken_.isEmpty()) {
     return;
   }
 
@@ -496,7 +544,8 @@ void MainWindow::onSendClicked() {
 void MainWindow::refreshMessages() {
   messageView_->clear();
 
-  for (const QString& messageId : conversationMessageOrder_.value(currentConversationId_)) {
+  for (const QString& messageId :
+       conversationMessageOrder_.value(currentConversationId_)) {
     const ChatMessage& message = messages_.value(messageId);
 
     QString statusText;

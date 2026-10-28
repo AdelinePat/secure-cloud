@@ -1,5 +1,6 @@
 #include "network/HttpClient.hpp"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
@@ -70,7 +71,8 @@ QNetworkReply* HttpClient::listConversations(const QString& jwt) {
 }
 
 QNetworkReply* HttpClient::createConversation(const QString& jwt,
-                                              const QString& name) {
+                                              const QString& name,
+                                              const QStringList& participants) {
   QUrl url = baseUrl_;
   url.setPath("/messaging/conversations");
 
@@ -81,8 +83,18 @@ QNetworkReply* HttpClient::createConversation(const QString& jwt,
 
   networkRequest.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
 
-  // Build the conversation creation payload.
-  QJsonObject json{{"type", "group"}, {"name", name}};
+  QJsonArray participantsArray;
+
+  for (const QString& username : participants) {
+    const QString trimmedUsername = username.trimmed();
+
+    if (!trimmedUsername.isEmpty()) {
+      participantsArray.append(trimmedUsername);
+    }
+  }
+
+  QJsonObject json{
+      {"type", "group"}, {"name", name}, {"participants", participantsArray}};
 
   const QByteArray body = QJsonDocument(json).toJson(QJsonDocument::Compact);
 

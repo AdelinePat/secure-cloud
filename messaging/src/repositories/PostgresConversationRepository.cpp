@@ -6,6 +6,20 @@ PostgresConversationRepository::PostgresConversationRepository(
     pqxx::connection& conn)
     : conn_(conn) {}
 
+std::optional<std::string> PostgresConversationRepository::findUserIdByUsername(
+    const std::string& username) {
+  pqxx::work txn(conn_);
+
+  const auto rows =
+      txn.exec_params("SELECT id FROM users WHERE username = $1", username);
+
+  if (rows.empty()) {
+    return std::nullopt;
+  }
+
+  return rows[0]["id"].as<std::string>();
+}
+
 std::vector<domain::Participant>
 PostgresConversationRepository::fetchParticipants(
     pqxx::work& txn, const std::string& conversationId) {
@@ -30,7 +44,8 @@ domain::Conversation PostgresConversationRepository::create(
   auto convRow = txn.exec_params(
       "INSERT INTO conversations (creator_id, type, name) "
       "VALUES ($1, $2, $3) "
-      "RETURNING id, creator_id, type, name, created_at::text, updated_at::text",
+      "RETURNING id, creator_id, type, name, created_at::text, "
+      "updated_at::text",
       conversation.creator_id, conversation.type, conversation.name);
 
   domain::Conversation stored;
@@ -45,7 +60,8 @@ domain::Conversation PostgresConversationRepository::create(
 
   for (const auto& p : conversation.participants) {
     auto pRow = txn.exec_params(
-        "INSERT INTO conversation_participants (conversation_id, user_id, role) "
+        "INSERT INTO conversation_participants (conversation_id, user_id, "
+        "role) "
         "VALUES ($1, $2, $3) RETURNING joined_at::text",
         stored.id, p.user_id, p.role);
 
@@ -53,7 +69,8 @@ domain::Conversation PostgresConversationRepository::create(
         p.user_id, p.role, pRow[0]["joined_at"].as<std::string>()});
   }
 
-  txn.commit();  // participants insert atomically with the conversation, or not at all
+  txn.commit();  // participants insert atomically with the conversation, or not
+                 // at all
   return stored;
 }
 
@@ -94,7 +111,8 @@ std::vector<domain::Conversation> PostgresConversationRepository::listForUser(
   // Fine at MVP scale; if this shows up in profiling later, replace with a
   // single query joining conversation_participants and grouping client-side.
   auto convRows = txn.exec_params(
-      "SELECT c.id, c.creator_id, c.type, c.name, c.created_at::text, c.updated_at::text "
+      "SELECT c.id, c.creator_id, c.type, c.name, c.created_at::text, "
+      "c.updated_at::text "
       "FROM conversations c "
       "JOIN conversation_participants cp ON cp.conversation_id = c.id "
       "WHERE cp.user_id = $1 "

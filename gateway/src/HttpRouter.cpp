@@ -122,15 +122,31 @@ http::response<http::string_body> HttpRouter::route(
     }
   }
 
-  // Proxy conversation creation and listing requests to Messaging.
-  if (request.target() == "/messaging/conversations") {
-    if (request.method() != http::verb::post &&
-        request.method() != http::verb::get) {
+  // Proxy conversation and message requests to Messaging.
+  const std::string target(request.target());
+
+  const std::string conversationsPath = "/messaging/conversations";
+  const std::string messagesSuffix = "/messages";
+
+  const bool isConversationRoute = target == conversationsPath;
+
+  const bool isMessageRoute =
+      target.starts_with(conversationsPath + "/") &&
+      target.ends_with(messagesSuffix) &&
+      target.size() > conversationsPath.size() + messagesSuffix.size() + 1;
+
+  if (isConversationRoute || isMessageRoute) {
+    const bool allowedMethod = isMessageRoute
+                                   ? request.method() == http::verb::post
+                                   : request.method() == http::verb::post ||
+                                         request.method() == http::verb::get;
+
+    if (!allowedMethod) {
       http::response<http::string_body> response{
           http::status::method_not_allowed, request.version()};
 
       response.set(http::field::content_type, "application/json");
-      response.set(http::field::allow, "GET, POST");
+      response.set(http::field::allow, isMessageRoute ? "POST" : "GET, POST");
       response.body() = R"({"error":"METHOD_NOT_ALLOWED"})";
       response.prepare_payload();
 
@@ -149,7 +165,7 @@ http::response<http::string_body> HttpRouter::route(
     http::request<http::string_body> messagingRequest = request;
 
     // Rewrite the public path to the Messaging internal endpoint.
-    messagingRequest.target("/conversations");
+    messagingRequest.target(target.substr(std::string("/messaging").size()));
     messagingRequest.set(http::field::host, host);
     messagingRequest.keep_alive(false);
 

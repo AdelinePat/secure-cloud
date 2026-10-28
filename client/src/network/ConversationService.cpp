@@ -38,8 +38,10 @@ void ConversationService::listConversations(const QString& jwt) {
 }
 
 void ConversationService::createConversation(const QString& jwt,
-                                             const QString& name) {
-  QNetworkReply* reply = httpClient_.createConversation(jwt, name);
+                                             const QString& name,
+                                             const QStringList& participants) {
+  QNetworkReply* reply =
+      httpClient_.createConversation(jwt, name, participants);
 
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     // Ensure the network reply is released.
