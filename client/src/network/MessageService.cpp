@@ -1,38 +1,47 @@
 #include "network/MessageService.hpp"
-#include "network/SendMessageResultMapper.hpp"
 
 #include <QNetworkReply>
+#include <QNetworkRequest>
+
+#include "network/SendMessageResultMapper.hpp"
 
 namespace network {
 
 MessageService::MessageService(const QUrl& baseUrl, QObject* parent)
-    : QObject(parent),
-      httpClient_(baseUrl, this)
-{
+    : QObject(parent), httpClient_(baseUrl, this) {}
+
+void MessageService::sendMessage(const QString& conversationId,
+                                 const QString& jwt,
+                                 const dto::SendMessageRequest& request) {
+  QNetworkReply* reply = httpClient_.sendMessage(conversationId, jwt, request);
+
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [this, reply, messageId = QString::fromStdString(request.messageId)]() {
+        dto::SendMessageResult result =
+            SendMessageResultMapper::fromReply(reply);
+
+        emit messageSent(messageId, result);
+
+        reply->deleteLater();
+      });
 }
 
-void MessageService::sendMessage(
-    const QString& conversationId,
-    const QString& jwt,
-    const dto::SendMessageRequest& request)
-{
-    QNetworkReply* reply =
-        httpClient_.sendMessage(conversationId, jwt, request);
+void MessageService::getMessageHistory(const QString& conversationId,
+                                       const QString& jwt) {
+  QNetworkReply* reply = httpClient_.getMessageHistory(conversationId, jwt);
 
-    connect(
-        reply,
-        &QNetworkReply::finished,
-        this,
-        [this, reply, messageId = QString::fromStdString(request.messageId)]() {
+  connect(
+      reply, &QNetworkReply::finished, this, [this, reply, conversationId]() {
+        const QByteArray response = reply->readAll();
 
-            dto::SendMessageResult result =
-                SendMessageResultMapper::fromReply(reply);
+        const int httpStatus =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
-            emit messageSent(messageId, result);
+        emit messageHistoryReceived(conversationId, response, httpStatus);
 
-            reply->deleteLater();
-        }
-    );
+        reply->deleteLater();
+      });
 }
 
 }  // namespace network

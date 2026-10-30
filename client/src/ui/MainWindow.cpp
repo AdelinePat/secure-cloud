@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QHBoxLayout>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -125,15 +126,27 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
               conversationDrafts_[currentConversationId_] =
                   messageInput_->text();
             }
+
             currentConversationId_ =
                 current ? current->data(Qt::UserRole).toString() : QString();
+
             conversationTitle_->setText(current ? current->text()
                                                 : "Select a conversation");
+
             messageInput_->setText(
                 conversationDrafts_.value(currentConversationId_));
+
             sendButton_->setEnabled(current != nullptr);
             messageInput_->setEnabled(current != nullptr);
+
+            // Affiche les messages déjà présents en mémoire
             refreshMessages();
+
+            // Récupère l'historique depuis le serveur
+            if (!currentConversationId_.isEmpty() && !accessToken_.isEmpty()) {
+              messageService_.getMessageHistory(currentConversationId_,
+                                                accessToken_);
+            }
           });
   connect(reloadConversationsButton_, &QPushButton::clicked, this,
           &MainWindow::loadConversations);
@@ -167,6 +180,98 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
 
             // Update the corresponding message
             updateMessageStatus(messageId, status);
+          });
+
+  connect(&messageService_, &network::MessageService::messageHistoryReceived,
+          this,
+          [this](const QString& conversationId, const QByteArray& response,
+                 int httpStatus) {
+            if (httpStatus != 200) {
+              qWarning() << "Failed to load history:" << httpStatus;
+              return;
+            }
+
+            QJsonParseError parseError;
+            const QJsonDocument document =
+                QJsonDocument::fromJson(response, &parseError);
+
+            if (parseError.error != QJsonParseError::NoError ||
+                !document.isObject()) {
+              qWarning() << "Invalid history JSON:" << parseError.errorString();
+              return;
+            }
+
+            const QJsonObject root = document.object();
+
+            if (!root.value("messages").isArray()) {
+              qWarning() << "Missing messages array";
+              return;
+            }
+
+            const QJsonArray messages = root.value("messages").toArray();
+
+            qDebug() << "Conversation:" << conversationId;
+            qDebug() << "Messages received:" << messages.size();
+
+            for (const QJsonValue& value : messages) {
+              if (!value.isObject()) {
+                continue;
+              }
+
+              const QJsonObject message = value.toObject();
+
+              const QString messageId = message.value("message_id").toString();
+
+              const QString senderId = message.value("user_id").toString();
+
+              const QString nonce = message.value("nonce").toString();
+
+              const QString ciphertext = message.value("ciphertext").toString();
+
+              if (messageId.isEmpty()) {
+                continue;
+              }
+
+              // Évite d'écraser un message déjà présent en mémoire
+              if (messages_.contains(messageId)) {
+                continue;
+              }
+
+              ChatMessage chatMessage;
+
+              chatMessage.id = messageId;
+              chatMessage.text = "[Encrypted message]";
+              chatMessage.status = MessageStatus::Sent;
+
+              chatMessage.senderId = senderId;
+              chatMessage.nonce = nonce;
+              chatMessage.ciphertext = ciphertext;
+
+              chatMessage.serverTimestamp =
+                  message.value("server_timestamp").toString();
+
+              chatMessage.encryptionVersion =
+                  message.value("encryption_version").toInt(1);
+
+              messages_.insert(messageId, chatMessage);
+            }
+
+            QStringList& order = conversationMessageOrder_[conversationId];
+
+            // Le serveur renvoie les messages du plus récent au plus ancien.
+            for (int i = messages.size() - 1; i >= 0; --i) {
+              const QJsonObject message = messages.at(i).toObject();
+
+              const QString messageId = message.value("message_id").toString();
+
+              if (messages_.contains(messageId) && !order.contains(messageId)) {
+                order.append(messageId);
+              }
+            }
+
+            if (conversationId == currentConversationId_) {
+              refreshMessages();
+            }
           });
 
   connect(createConversationButton_, &QPushButton::clicked, this,
@@ -529,16 +634,16 @@ void MainWindow::onSendClicked() {
     request.clientTimestamp = QDateTime::currentDateTimeUtc()
                                   .toString(Qt::ISODateWithMs)
                                   .toStdString();
+
+    // Send the encrypted message asynchronously through the Gateway
+    messageService_.sendMessage(currentConversationId_, accessToken_, request);
+
   } catch (const std::exception& e) {
     // Update the message status to indicate failure
     updateMessageStatus(messageId, MessageStatus::Failed);
-    qWarning() << "Message encryption failed:" << e.what();
+    qWarning() << "Message sending failed:" << e.what();
     return;
   }
-  // Simulate an asynchronous server response
-  QTimer::singleShot(1500, this, [this, messageId]() {
-    updateMessageStatus(messageId, MessageStatus::Sent);
-  });
 }
 
 void MainWindow::refreshMessages() {

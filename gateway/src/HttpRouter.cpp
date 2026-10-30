@@ -136,17 +136,15 @@ http::response<http::string_body> HttpRouter::route(
       target.size() > conversationsPath.size() + messagesSuffix.size() + 1;
 
   if (isConversationRoute || isMessageRoute) {
-    const bool allowedMethod = isMessageRoute
-                                   ? request.method() == http::verb::post
-                                   : request.method() == http::verb::post ||
-                                         request.method() == http::verb::get;
+    const bool allowedMethod = request.method() == http::verb::post ||
+                               request.method() == http::verb::get;
 
     if (!allowedMethod) {
       http::response<http::string_body> response{
           http::status::method_not_allowed, request.version()};
 
       response.set(http::field::content_type, "application/json");
-      response.set(http::field::allow, isMessageRoute ? "POST" : "GET, POST");
+      response.set(http::field::allow, "GET, POST");
       response.body() = R"({"error":"METHOD_NOT_ALLOWED"})";
       response.prepare_payload();
 

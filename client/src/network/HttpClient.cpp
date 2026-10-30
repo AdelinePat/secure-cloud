@@ -16,7 +16,7 @@ QNetworkReply* HttpClient::sendMessage(const QString& conversationId,
                                        const QString& jwt,
                                        const dto::SendMessageRequest& request) {
   QUrl url = baseUrl_;
-  QString path = "/secureChat/conversations/" + conversationId + "/messages";
+  QString path = "/messaging/conversations/" + conversationId + "/messages";
   url.setPath(path);
 
   QNetworkRequest networkRequest(url);
@@ -31,6 +31,17 @@ QNetworkReply* HttpClient::sendMessage(const QString& conversationId,
   QByteArray body = QByteArray::fromStdString(serializedRequest);
 
   return networkManager_.post(networkRequest, body);
+}
+
+QNetworkReply* HttpClient::getMessageHistory(const QString& conversationId,
+                                             const QString& jwt) {
+  QUrl url = baseUrl_;
+  url.setPath("/messaging/conversations/" + conversationId + "/messages");
+
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+
+  return networkManager_.get(request);
 }
 
 QNetworkReply* HttpClient::login(const QString& username,

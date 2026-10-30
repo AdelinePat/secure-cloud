@@ -3,6 +3,7 @@
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -43,6 +44,18 @@ std::optional<std::vector<unsigned char>> decodeBase64(
 
   decoded.resize(decodedLength);
   return decoded;
+}
+
+std::string encodeBase64(const std::vector<unsigned char>& data) {
+  std::string encoded(
+      sodium_base64_ENCODED_LEN(data.size(), sodium_base64_VARIANT_ORIGINAL),
+      '\0');
+
+  sodium_bin2base64(encoded.data(), encoded.size(), data.data(), data.size(),
+                    sodium_base64_VARIANT_ORIGINAL);
+
+  encoded.resize(std::strlen(encoded.c_str()));
+  return encoded;
 }
 
 using tcp = asio::ip::tcp;
@@ -406,6 +419,81 @@ int main() {
 
           } catch (const std::exception& e) {
             std::cerr << "Message creation error: " << e.what() << '\n';
+
+            response.result(http::status::internal_server_error);
+            response.body() = R"({"error":"INTERNAL_ERROR"})";
+          }
+        }
+      } else if (request.method() == http::verb::get &&
+                 std::regex_match(
+                     std::string(request.target()),
+                     std::regex(
+                         R"(^/conversations/[0-9a-fA-F-]{36}/messages$)"))) {
+        const std::string target(request.target());
+
+        const std::string conversationId =
+            target.substr(std::string("/conversations/").size(), 36);
+
+        const std::regex uuidPattern(
+            R"(^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)");
+
+        const auto authorization = request[http::field::authorization];
+        const std::string authValue(authorization.data(), authorization.size());
+        const std::string bearerPrefix = "Bearer ";
+
+        const auto subject =
+            authValue.compare(0, bearerPrefix.size(), bearerPrefix) == 0
+                ? jwtVerifier.verify(authValue.substr(bearerPrefix.size()))
+                : std::nullopt;
+
+        if (!subject.has_value()) {
+          response.result(http::status::unauthorized);
+          response.body() = R"({"error":"UNAUTHORIZED"})";
+
+        } else if (!std::regex_match(conversationId, uuidPattern)) {
+          response.result(http::status::bad_request);
+          response.body() = R"({"error":"INVALID_CONVERSATION_ID"})";
+
+        } else {
+          try {
+            const auto role =
+                conversationRepository.findRole(conversationId, *subject);
+
+            if (!role.has_value()) {
+              response.result(http::status::forbidden);
+              response.body() = R"({"error":"FORBIDDEN"})";
+
+            } else {
+              const auto page =
+                  messageRepository.history(conversationId, std::nullopt, 50);
+
+              auto messages = nlohmann::json::array();
+
+              for (const auto& message : page.messages) {
+                messages.push_back(
+                    {{"message_id", message.id},
+                     {"conversation_id", message.conversation_id},
+                     {"user_id", message.user_id.value_or("")},
+                     {"ciphertext", encodeBase64(message.ciphertext)},
+                     {"nonce", message.nonce},
+                     {"encryption_version", message.encryption_version},
+                     {"server_timestamp", message.server_timestamp}});
+              }
+
+              nlohmann::json historyResponse;
+
+              historyResponse["messages"] = messages;
+
+              historyResponse["next_cursor"] =
+                  page.nextCursor.has_value() ? nlohmann::json(*page.nextCursor)
+                                              : nlohmann::json(nullptr);
+
+              response.result(http::status::ok);
+              response.body() = historyResponse.dump();
+            }
+
+          } catch (const std::exception& e) {
+            std::cerr << "Message history error: " << e.what() << '\n';
 
             response.result(http::status::internal_server_error);
             response.body() = R"({"error":"INTERNAL_ERROR"})";

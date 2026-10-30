@@ -23,6 +23,10 @@ class HttpClient : public QObject {
   QNetworkReply* sendMessage(const QString& conversationId, const QString& jwt,
                              const dto::SendMessageRequest& request);
 
+  // Retrieve encrypted messages from a conversation.
+  QNetworkReply* getMessageHistory(const QString& conversationId,
+                                   const QString& jwt);
+
   QNetworkReply* listConversations(const QString& jwt);
   const QUrl& baseUrl() const { return baseUrl_; }
 

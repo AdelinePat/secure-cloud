@@ -1,5 +1,7 @@
 #include "messaging/repositories/PostgresMessageRepository.hpp"
 
+#include <stdexcept>
+
 namespace messaging::repositories {
 
 namespace {
@@ -40,9 +42,11 @@ domain::Message PostgresMessageRepository::create(
   pqxx::work txn(conn_);
 
   auto result = txn.exec_params(
-      "INSERT INTO messages (id, conversation_id, user_id, ciphertext, nonce, encryption_version) "
+      "INSERT INTO messages (id, conversation_id, user_id, ciphertext, nonce, "
+      "encryption_version) "
       "VALUES ($1, $2, $3, decode($4, 'hex'), $5, $6) "
-      "RETURNING id, conversation_id, user_id, encode(ciphertext, 'hex') AS ciphertext_hex, "
+      "RETURNING id, conversation_id, user_id, encode(ciphertext, 'hex') AS "
+      "ciphertext_hex, "
       "          nonce, encryption_version, server_timestamp::text",
       message.id, message.conversation_id, message.user_id,
       toHex(message.ciphertext), message.nonce, message.encryption_version);
@@ -53,7 +57,8 @@ domain::Message PostgresMessageRepository::create(
   domain::Message stored;
   stored.id = row["id"].as<std::string>();
   stored.conversation_id = row["conversation_id"].as<std::string>();
-  if (!row["user_id"].is_null()) stored.user_id = row["user_id"].as<std::string>();
+  if (!row["user_id"].is_null())
+    stored.user_id = row["user_id"].as<std::string>();
   stored.ciphertext = fromHex(row["ciphertext_hex"].as<std::string>());
   stored.nonce = row["nonce"].as<std::string>();
   stored.encryption_version = row["encryption_version"].as<int16_t>();
@@ -66,22 +71,42 @@ MessagePage PostgresMessageRepository::history(
     int limit) {
   pqxx::work txn(conn_);
 
+  std::optional<std::string> beforeTimestamp;
+  std::optional<std::string> beforeId;
+
+  if (before.has_value()) {
+    const std::size_t separator = before->rfind('|');
+
+    if (separator == std::string::npos || separator == 0 ||
+        separator + 1 == before->size()) {
+      throw std::invalid_argument("Invalid message history cursor");
+    }
+
+    beforeTimestamp = before->substr(0, separator);
+    beforeId = before->substr(separator + 1);
+  }
+
   pqxx::result result;
   if (before.has_value()) {
     result = txn.exec_params(
-        "SELECT id, conversation_id, user_id, encode(ciphertext, 'hex') AS ciphertext_hex, "
+        "SELECT id, conversation_id, user_id, encode(ciphertext, 'hex') AS "
+        "ciphertext_hex, "
         "       nonce, encryption_version, server_timestamp::text "
         "FROM messages "
-        "WHERE conversation_id = $1 AND server_timestamp < $2::timestamptz AND deleted_at IS NULL "
-        "ORDER BY server_timestamp DESC LIMIT $3",
-        conversationId, *before, limit);
+        "WHERE conversation_id = $1 "
+        "AND (server_timestamp, id) < ($2::timestamptz, $3::uuid) "
+        "AND deleted_at IS NULL "
+        "ORDER BY server_timestamp DESC, id DESC "
+        "LIMIT $4",
+        conversationId, *beforeTimestamp, *beforeId, limit);
   } else {
     result = txn.exec_params(
-        "SELECT id, conversation_id, user_id, encode(ciphertext, 'hex') AS ciphertext_hex, "
+        "SELECT id, conversation_id, user_id, encode(ciphertext, 'hex') AS "
+        "ciphertext_hex, "
         "       nonce, encryption_version, server_timestamp::text "
         "FROM messages "
         "WHERE conversation_id = $1 AND deleted_at IS NULL "
-        "ORDER BY server_timestamp DESC LIMIT $2",
+        "ORDER BY server_timestamp DESC, id DESC LIMIT $2",
         conversationId, limit);
   }
 
@@ -103,7 +128,9 @@ MessagePage PostgresMessageRepository::history(
   // Only offer a next page if we got a full page — a short page means we hit
   // the end of history.
   if (static_cast<int>(page.messages.size()) == limit) {
-    page.nextCursor = page.messages.back().server_timestamp;
+    const auto& lastMessage = page.messages.back();
+
+    page.nextCursor = lastMessage.server_timestamp + "|" + lastMessage.id;
   }
 
   return page;
