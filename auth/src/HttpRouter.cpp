@@ -81,7 +81,8 @@ HttpRouter::Response HttpRouter::route(const Request& request) const {
 
           } else {
             response = jsonResponse(http::status::ok, request.version(),
-                                    {{"access_token", result->accessToken},
+                                    {{"user_id", result->userId},
+                                     {"access_token", result->accessToken},
                                      {"refresh_token", result->refreshToken},
                                      {"token_type", "Bearer"},
                                      {"expires_in", 900}});

@@ -61,6 +61,7 @@ add_library(securechat_crypto
     src/crypto/KeyManager.cpp
     src/crypto/MessageCrypto.cpp
     src/crypto/MessageSerializer.cpp
+    src/crypto/IdentityKeyStore.cpp
 )
 
 set_target_properties(securechat_crypto PROPERTIES
@@ -92,6 +93,7 @@ target_include_directories(securechat_crypto PUBLIC
 target_link_libraries(securechat_crypto
     PUBLIC
         sodium
+        Qt6::Core
 )
 
 target_link_libraries(client
@@ -404,3 +406,21 @@ target_link_libraries(test_MainWindow PRIVATE
 )
 add_test(NAME MainWindowTests COMMAND test_MainWindow)
 set_tests_properties(MainWindowTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# --------------------------------------------------
+# IdentityKeyStore tests
+# --------------------------------------------------
+
+add_executable(test_IdentityKeyStore
+    tests/crypto/test_IdentityKeyStore.cpp
+)
+
+target_link_libraries(test_IdentityKeyStore
+    PRIVATE
+        securechat_crypto
+)
+
+add_test(
+    NAME IdentityKeyStoreTests
+    COMMAND test_IdentityKeyStore
+)

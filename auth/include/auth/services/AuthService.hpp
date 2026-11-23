@@ -15,6 +15,7 @@ struct LoginRequest {
 };
 
 struct LoginResult {
+  std::string userId;
   std::string accessToken;
   std::string refreshToken;
 };

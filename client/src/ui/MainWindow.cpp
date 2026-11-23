@@ -395,16 +395,19 @@ void MainWindow::onLoginClicked() {
 
     const QJsonObject json = document.object();
 
+    const QString userId = json.value("user_id").toString();
     const QString accessToken = json.value("access_token").toString();
     const QString refreshToken = json.value("refresh_token").toString();
 
-    if (accessToken.isEmpty() || refreshToken.isEmpty()) {
+    if (QUuid(userId).isNull() || accessToken.isEmpty() ||
+        refreshToken.isEmpty()) {
       qWarning() << "Missing authentication tokens";
       reply->deleteLater();
       return;
     }
 
     resetConversations();
+    currentUserId_ = userId;
     accessToken_ = accessToken;
     refreshToken_ = refreshToken;
 
@@ -515,6 +518,7 @@ void MainWindow::refreshAccessToken() {
 
 void MainWindow::resetConversations() {
   ++sessionGeneration_;
+  currentUserId_.clear();
   currentConversationId_.clear();
   conversationList_->clear();
   messages_.clear();

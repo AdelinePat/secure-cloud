@@ -63,6 +63,7 @@ class MainWindow : public QMainWindow {
   QLineEdit* passwordInput_;
   QPushButton* loginButton_;
 
+  QString currentUserId_;
   QString accessToken_;
   QString refreshToken_;
   QTimer* refreshTimer_;
