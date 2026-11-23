@@ -1,4 +1,5 @@
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -43,7 +44,7 @@ void TestConversationService::createConversation_emitsConversationCreated() {
   QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
 
   service.createConversation("fake-jwt-token", "Equipe SecureChat",
-                             QStringList{"alice", "bob"});
+                             QStringList{"alice", " bob ", ""});
 
   QVERIFY(connectionSpy.wait(3000));
 
@@ -74,6 +75,12 @@ void TestConversationService::createConversation_emitsConversationCreated() {
   QCOMPARE(requestJson.object().value("type").toString(), QString("group"));
   QCOMPARE(requestJson.object().value("name").toString(),
            QString("Equipe SecureChat"));
+  // Participants are trimmed and empty entries are dropped.
+  const QJsonArray participants =
+      requestJson.object().value("participants").toArray();
+  QCOMPARE(participants.size(), 2);
+  QCOMPARE(participants.at(0).toString(), QString("alice"));
+  QCOMPARE(participants.at(1).toString(), QString("bob"));
 
   // Simulate a successful response from the Gateway.
   const QByteArray responseBody =

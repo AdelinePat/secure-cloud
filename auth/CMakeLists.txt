@@ -15,6 +15,12 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# ── shared audit emitter (mTLS client to the audit service) ────────────────
+add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/audit"
+    "${CMAKE_BINARY_DIR}/common-audit"
+)
+
 # ── auth library (all logic, no main) ──────────────────────────────────────
 # Everything under src/ except main.cpp — main.cpp stays exclusive to the
 # `auth` executable below, so it's never compiled into two objects at once
@@ -40,6 +46,7 @@ if(AUTH_LIB_SOURCES)
         libpqxx::pqxx
         PkgConfig::SODIUM
         nlohmann_json::nlohmann_json
+        securechat_audit_client
     )
 
     target_compile_options(auth_lib PRIVATE

@@ -7,9 +7,10 @@
 namespace auth {
 
 HttpServer::HttpServer(asio::io_context& ioContext, std::uint16_t port,
-                       services::AuthService& authService)
+                       services::AuthService& authService,
+                       common::audit::Client* audit)
     : acceptor_(ioContext, tcp::endpoint(tcp::v4(), port)),
-      router_(authService) {}
+      router_(authService, audit) {}
 
 void HttpServer::run() {
   for (;;) {

@@ -50,6 +50,12 @@ services:
       AUTH_DATABASE_URL: "host=app-db port=${DB_PORT} dbname=${POSTGRES_DB_DATA} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}"
       AUTH_JWT_PRIVATE_KEY_PATH: "/app/auth-keys/private.pem"
       AUTH_JWT_PUBLIC_KEY_PATH: "/app/auth-keys/public.pem"
+      AUDIT_ENABLED: "true"
+      AUDIT_URL: "https://audit:8085"
+      AUDIT_SERVICE_NAME: "auth"
+      AUDIT_TLS_CERT: "/app/certs/auth/auth.crt"
+      AUDIT_TLS_KEY: "/app/certs/auth/auth.key"
+      AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
@@ -57,6 +63,9 @@ services:
       - type: bind
         source: ./certs/auth
         target: /app/certs/auth
+      - type: bind
+        source: ./common
+        target: /app/common
       - type: bind
         source: ./auth
         target: /app/auth
@@ -79,6 +88,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB_DATA}
       MESSAGING_JWT_PUBLIC_KEY_PATH: "/app/jwt/public.pem"
+      AUDIT_ENABLED: "true"
+      AUDIT_URL: "https://audit:8085"
+      AUDIT_SERVICE_NAME: "messaging"
+      AUDIT_TLS_CERT: "/app/certs/messaging/messaging.crt"
+      AUDIT_TLS_KEY: "/app/certs/messaging/messaging.key"
+      AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
     depends_on:
       app-db:
         condition: service_healthy
@@ -93,6 +108,9 @@ services:
       - type: bind
         source: ./certs/messaging
         target: /app/certs/messaging
+      - type: bind
+        source: ./common
+        target: /app/common
       - type: bind
         source: ./messaging
         target: /app/messaging
