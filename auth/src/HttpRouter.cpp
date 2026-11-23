@@ -4,15 +4,30 @@
 #include <exception>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 
 #include "auth/HttpResponse.hpp"
+#include "common/audit/AuditClient.hpp"
 
 namespace auth {
 
 namespace {
 
 using json = nlohmann::json;
+
+void emitLogin(common::audit::Client* audit, const char* eventType,
+               const char* outcome, const std::optional<std::string>& actorId,
+               const std::string& username) {
+  if (audit == nullptr || !audit->enabled()) return;
+
+  common::audit::Event event;
+  event.event_type = eventType;
+  event.actor_id = actorId;
+  event.outcome = outcome;
+  event.metadata = {{"username", username}};
+  audit->emit(event);
+}
 
 // Build a JSON HTTP response.
 HttpRouter::Response jsonResponse(http::status status, unsigned version,
@@ -28,8 +43,9 @@ HttpRouter::Response jsonResponse(http::status status, unsigned version,
 
 }  // namespace
 
-HttpRouter::HttpRouter(services::AuthService& authService)
-    : authService_(authService) {}
+HttpRouter::HttpRouter(services::AuthService& authService,
+                       common::audit::Client* audit)
+    : authService_(authService), audit_(audit) {}
 
 HttpRouter::Response HttpRouter::route(const Request& request) const {
   Response response{http::status::not_found, request.version()};
@@ -75,11 +91,17 @@ HttpRouter::Response HttpRouter::route(const Request& request) const {
           const auto result = authService_.login(loginRequest);
 
           if (!result.has_value()) {
+            emitLogin(audit_, "login_failed", "failure", std::nullopt,
+                      loginRequest.username);
+
             response =
                 jsonResponse(http::status::unauthorized, request.version(),
                              {{"error", "Invalid credentials"}});
 
           } else {
+            emitLogin(audit_, "login_succeeded", "success", result->userId,
+                      loginRequest.username);
+
             response = jsonResponse(http::status::ok, request.version(),
                                     {{"access_token", result->accessToken},
                                      {"refresh_token", result->refreshToken},

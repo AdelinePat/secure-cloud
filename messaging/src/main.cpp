@@ -15,6 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "common/audit/AuditClient.hpp"
 #include "messaging/repositories/PostgresConversationRepository.hpp"
 #include "messaging/repositories/PostgresMessageRepository.hpp"
 #include "messaging/security/JwtVerifier.hpp"
@@ -89,6 +90,16 @@ int main() {
         dbConnection);
 
     std::cout << "Messaging connected to PostgreSQL" << std::endl;
+
+    // Best-effort emitter for security-relevant events. Disabled unless
+    // AUDIT_ENABLED is true; a failure never affects message handling.
+    const auto auditConfig = common::audit::Config::fromEnv("messaging");
+    common::audit::Client auditClient(auditConfig);
+
+    if (auditClient.enabled()) {
+      std::cout << "Audit emitter enabled -> " << auditConfig.url << " as "
+                << auditClient.serviceName() << std::endl;
+    }
 
     asio::io_context ioContext;
 
@@ -225,6 +236,16 @@ int main() {
                   const auto stored =
                       conversationRepository.create(conversation);
 
+                  common::audit::Event auditEvent;
+                  auditEvent.event_type = "conversation_created";
+                  auditEvent.actor_id = *subject;
+                  auditEvent.target_id = stored.id;
+                  auditEvent.outcome = "success";
+                  auditEvent.metadata = {
+                      {"type", stored.type},
+                      {"name", stored.name.value_or("")}};
+                  auditClient.emit(auditEvent);
+
                   response.result(http::status::created);
                   response.body() = nlohmann::json{
                       {"id", stored.id},
@@ -321,6 +342,14 @@ int main() {
                 conversationRepository.findRole(conversationId, *subject);
 
             if (!role.has_value()) {
+              common::audit::Event auditEvent;
+              auditEvent.event_type = "message_send_denied";
+              auditEvent.actor_id = *subject;
+              auditEvent.target_id = conversationId;
+              auditEvent.outcome = "failure";
+              auditEvent.metadata = {{"reason", "not_a_participant"}};
+              auditClient.emit(auditEvent);
+
               response.result(http::status::forbidden);
               response.body() = R"({"error":"FORBIDDEN"})";
 
@@ -380,6 +409,14 @@ int main() {
                   message.encryption_version = 1;
 
                   const auto stored = messageRepository.create(message);
+
+                  common::audit::Event auditEvent;
+                  auditEvent.event_type = "message_sent";
+                  auditEvent.actor_id = *subject;
+                  auditEvent.target_id = conversationId;
+                  auditEvent.outcome = "success";
+                  auditEvent.metadata = {{"message_id", stored.id}};
+                  auditClient.emit(auditEvent);
 
                   response.result(http::status::created);
                   response.body() =

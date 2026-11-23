@@ -16,6 +16,12 @@ find_package(nlohmann_json REQUIRED)
 
 find_library(SODIUM_LIBRARY NAMES sodium REQUIRED)
 
+# ── shared audit emitter (mTLS client to the audit service) ────────────────
+add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/audit"
+    "${CMAKE_BINARY_DIR}/common-audit"
+)
+
 # ── messaging library (all logic, no main) ──────────────────────────────────
 # Everything under src/ except main.cpp — main.cpp stays exclusive to the
 # `messaging` executable below, so it's never compiled into two objects at once.
@@ -61,10 +67,11 @@ if(TARGET messaging_lib)
     target_link_libraries(messaging PRIVATE messaging_lib)
 endif()
 
-# Dependencies for the HTTP server (Boost.Asio / Boost.Beast)
+# Dependencies for the HTTP server (Boost.Asio / Boost.Beast) and audit emitter
 target_link_libraries(messaging PRIVATE
     Boost::headers
     Threads::Threads
+    securechat_audit_client
 )
 
 target_compile_options(messaging PRIVATE

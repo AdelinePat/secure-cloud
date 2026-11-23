@@ -16,6 +16,7 @@
 #include "auth/repositories/PostgresSessionRepository.hpp"
 #include "auth/repositories/PostgresUserRepository.hpp"
 #include "auth/services/AuthService.hpp"
+#include "common/audit/AuditClient.hpp"
 
 namespace {
 
@@ -75,13 +76,25 @@ int main() {
         sessionRepository,
         jwtKeyManager);
 
+    // Best-effort emitter for security-relevant events. Disabled unless
+    // AUDIT_ENABLED is true; a failure never affects authentication.
+    const auto auditConfig = common::audit::Config::fromEnv("auth");
+    common::audit::Client auditClient(auditConfig);
+
+    if (auditClient.enabled()) {
+      std::cout << "Audit emitter enabled -> "
+                << auditConfig.url << " as "
+                << auditClient.serviceName() << std::endl;
+    }
+
     // Initialize the HTTP server.
     boost::asio::io_context ioContext;
 
     auth::HttpServer server(
         ioContext,
         port,
-        authService);
+        authService,
+        &auditClient);
 
     std::cout << "Auth service listening on port "
               << port << std::endl;

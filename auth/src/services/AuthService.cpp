@@ -108,7 +108,9 @@ std::optional<LoginResult> AuthService::login(const LoginRequest& request) {
       crypto::TokenService::generateAccessToken(claims, jwtKeyManager_);
 
   // Return both tokens to the authenticated client.
-  return LoginResult{.accessToken = accessToken, .refreshToken = refreshToken};
+  return LoginResult{.userId = user->id,
+                     .accessToken = accessToken,
+                     .refreshToken = refreshToken};
 }
 
 std::optional<RefreshResult> AuthService::refresh(
