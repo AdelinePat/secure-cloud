@@ -1,4 +1,5 @@
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -42,7 +43,8 @@ void TestConversationService::createConversation_emitsConversationCreated() {
 
   QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
 
-  service.createConversation("fake-jwt-token", "Equipe SecureChat");
+  service.createConversation("fake-jwt-token", "Equipe SecureChat",
+                             QStringList{"alice", " bob ", ""});
 
   QVERIFY(connectionSpy.wait(3000));
 
@@ -73,6 +75,12 @@ void TestConversationService::createConversation_emitsConversationCreated() {
   QCOMPARE(requestJson.object().value("type").toString(), QString("group"));
   QCOMPARE(requestJson.object().value("name").toString(),
            QString("Equipe SecureChat"));
+  // Participants are trimmed and empty entries are dropped.
+  const QJsonArray participants =
+      requestJson.object().value("participants").toArray();
+  QCOMPARE(participants.size(), 2);
+  QCOMPARE(participants.at(0).toString(), QString("alice"));
+  QCOMPARE(participants.at(1).toString(), QString("bob"));
 
   // Simulate a successful response from the Gateway.
   const QByteArray responseBody =
@@ -124,7 +132,8 @@ void TestConversationService::createConversation_handlesUnauthorized() {
 
   QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
 
-  service.createConversation("invalid-jwt", "Equipe SecureChat");
+  service.createConversation("invalid-jwt", "Equipe SecureChat",
+                             QStringList{"alice"});
 
   QVERIFY(connectionSpy.wait(3000));
 
@@ -189,7 +198,7 @@ void TestConversationService::createConversation_handlesHttpErrors() {
 
     QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
 
-    service.createConversation("test-jwt", "Test");
+    service.createConversation("test-jwt", "Test", QStringList{"alice"});
 
     QVERIFY(connectionSpy.wait(3000));
 
@@ -232,7 +241,7 @@ void TestConversationService::createConversation_handlesInvalidJson() {
 
   QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
 
-  service.createConversation("test-jwt", "Test");
+  service.createConversation("test-jwt", "Test", QStringList{"alice"});
 
   QVERIFY(connectionSpy.wait(3000));
 
@@ -273,7 +282,7 @@ void TestConversationService::createConversation_handlesMissingId() {
 
   QSignalSpy connectionSpy(&server, &QTcpServer::newConnection);
 
-  service.createConversation("test-jwt", "Test");
+  service.createConversation("test-jwt", "Test", QStringList{"alice"});
 
   QVERIFY(connectionSpy.wait(3000));
 
@@ -315,7 +324,7 @@ void TestConversationService::createConversation_handlesConnectionRefused() {
   QSignalSpy failedSpy(
       &service, &network::ConversationService::conversationCreationFailed);
 
-  service.createConversation("test-jwt", "Test");
+  service.createConversation("test-jwt", "Test", QStringList{"alice"});
 
   QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 1, 10000);
   QCOMPARE(createdSpy.count(), 0);
