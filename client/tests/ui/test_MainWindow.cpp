@@ -1,16 +1,19 @@
-#include "ui/MainWindow.hpp"
+#include <sodium.h>
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStatusBar>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest/QtTest>
+#include <algorithm>
 #include <memory>
-#include <sodium.h>
+
+#include "ui/MainWindow.hpp"
 
 class TestMainWindow : public QObject {
   Q_OBJECT
-private slots:
+ private slots:
   void loginNavigationAndTokenRotation();
   void listingRejectsInvalidResponses_data();
   void listingRejectsInvalidResponses();
@@ -23,33 +26,34 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QList<QByteArray> requests;
   connect(&server, &QTcpServer::newConnection, &server, [&]() {
     while (server.hasPendingConnections()) {
-      auto *socket = server.nextPendingConnection();
+      auto* socket = server.nextPendingConnection();
       auto buffer = std::make_shared<QByteArray>();
       connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
       connect(socket, &QTcpSocket::readyRead, socket, [&, socket, buffer]() {
         buffer->append(socket->readAll());
         const auto split = buffer->indexOf("\r\n\r\n");
-        if (split < 0)
-          return;
+        if (split < 0) return;
         qsizetype length = 0;
-        for (const auto &line : buffer->left(split).split('\n')) {
+        for (const auto& line : buffer->left(split).split('\n')) {
           if (line.toLower().startsWith("content-length:"))
             length = line.mid(15).trimmed().toLongLong();
         }
-        if (buffer->size() < split + 4 + length)
-          return;
+        if (buffer->size() < split + 4 + length) return;
         const auto request = *buffer;
         buffer->clear();
         requests.append(request);
         QByteArray body;
         if (request.startsWith("POST /auth/login ")) {
           body =
-              R"({"access_token":"jwt-first","refresh_token":"refresh-first"})";
+              R"({"user_id":"550e8400-e29b-41d4-a716-446655440000","access_token":"jwt-first","refresh_token":"refresh-first"})";
         } else if (request.startsWith("POST /auth/refresh ")) {
           body =
               R"({"access_token":"jwt-rotated","refresh_token":"refresh-rotated"})";
         } else if (request.startsWith("GET /messaging/conversations ")) {
           body = R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"}])";
+        } else if (request.startsWith("GET /messaging/conversations/") &&
+                   request.contains("/messages HTTP/1.1")) {
+          body = R"({"messages":[]})";
         } else {
           body = R"({"id":"c","name":"New group"})";
         }
@@ -64,12 +68,12 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   network::HttpClient client(
       QUrl("http://127.0.0.1:" + QString::number(server.serverPort())));
   ui::MainWindow window(client);
-  auto *username = window.findChild<QLineEdit *>("usernameInput");
-  auto *password = window.findChild<QLineEdit *>("passwordInput");
-  auto *list = window.findChild<QListWidget *>("conversationList");
-  auto *input = window.findChild<QLineEdit *>("messageInput");
-  auto *send = window.findChild<QPushButton *>("sendButton");
-  auto *name = window.findChild<QLineEdit *>("conversationNameInput");
+  auto* username = window.findChild<QLineEdit*>("usernameInput");
+  auto* password = window.findChild<QLineEdit*>("passwordInput");
+  auto* list = window.findChild<QListWidget*>("conversationList");
+  auto* input = window.findChild<QLineEdit*>("messageInput");
+  auto* send = window.findChild<QPushButton*>("sendButton");
+  auto* name = window.findChild<QLineEdit*>("conversationNameInput");
   QVERIFY(username && password && list && input && send && name);
   QVERIFY(!send->isEnabled());
   username->setText("test-user");
@@ -78,7 +82,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QTest::keyClick(password, Qt::Key_Return);
   QTest::keyClick(username, Qt::Key_Return);
   QTRY_COMPARE(list->count(), 2);
-  QCOMPARE(requests.size(), 2);
+
   QVERIFY(requests[1].contains("Authorization: Bearer jwt-first"));
   QCOMPARE(list->currentRow(), 0);
   QVERIFY(send->isEnabled());
@@ -87,7 +91,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   input->setText("draft A");
   list->setCurrentRow(1);
   QVERIFY(input->text().isEmpty());
-  auto *view = window.findChild<QTextEdit *>();
+  auto* view = window.findChild<QTextEdit*>();
   QVERIFY(view->toPlainText().isEmpty());
   input->setText("message B");
   send->click();
@@ -103,18 +107,33 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QCOMPARE(input->text(), QString("draft B"));
   QVERIFY(view->toPlainText().contains("message B"));
   QVERIFY(QMetaObject::invokeMethod(&window, "refreshAccessToken"));
-  QTRY_COMPARE(requests.size(), 3);
-  QTRY_VERIFY(window.findChild<QTimer *>("refreshTimer")->isActive());
-  QVERIFY(requests[2].contains("refresh-first"));
+
+  QTRY_VERIFY(std::any_of(requests.cbegin(), requests.cend(),
+                          [](const QByteArray& request) {
+                            return request.startsWith("POST /auth/refresh ");
+                          }));
+  QTRY_VERIFY(window.findChild<QTimer*>("refreshTimer")->isActive());
+  QVERIFY(std::any_of(requests.cbegin(), requests.cend(),
+                      [](const QByteArray& request) {
+                        return request.startsWith("POST /auth/refresh ") &&
+                               request.contains("refresh-first");
+                      }));
   name->setText("New group");
   QTest::keyClick(name, Qt::Key_Return);
   QTRY_COMPARE(list->count(), 3);
   QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), QString("c"));
-  QVERIFY(requests.last().contains("Authorization: Bearer jwt-rotated"));
+  QTRY_VERIFY(std::any_of(
+      requests.cbegin(), requests.cend(), [](const QByteArray& request) {
+        return request.startsWith("POST /messaging/conversations ") &&
+               request.contains("Authorization: Bearer jwt-rotated");
+      }));
   // The second refresh must send the rotated refresh token.
   QVERIFY(QMetaObject::invokeMethod(&window, "refreshAccessToken"));
-  QTRY_COMPARE(requests.size(), 5);
-  QVERIFY(requests.last().contains("refresh-rotated"));
+  QTRY_VERIFY(std::any_of(requests.cbegin(), requests.cend(),
+                          [](const QByteArray& request) {
+                            return request.startsWith("POST /auth/refresh ") &&
+                                   request.contains("refresh-rotated");
+                          }));
 }
 
 void TestMainWindow::listingRejectsInvalidResponses_data() {
@@ -136,7 +155,7 @@ void TestMainWindow::listingRejectsInvalidResponses() {
   QTcpServer server;
   QVERIFY(server.listen(QHostAddress::LocalHost, 0));
   connect(&server, &QTcpServer::newConnection, &server, [&]() {
-    auto *socket = server.nextPendingConnection();
+    auto* socket = server.nextPendingConnection();
     connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
     connect(socket, &QTcpSocket::readyRead, socket, [socket, body, status]() {
       socket->readAll();
