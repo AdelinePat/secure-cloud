@@ -56,6 +56,7 @@ services:
       AUDIT_TLS_CERT: "/app/certs/auth/auth.crt"
       AUDIT_TLS_KEY: "/app/certs/auth/auth.key"
       AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
+      AUDIT_SPOOL_DIR: "/app/audit-spool/auth"
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
@@ -75,6 +76,9 @@ services:
       - type: volume
         source: auth-keys
         target: /app/auth-keys
+      - type: volume
+        source: audit-spool
+        target: /app/audit-spool
     command: [ "bash", "./secureChat.sh", "run", "auth" ]
 
   messaging:
@@ -94,6 +98,7 @@ services:
       AUDIT_TLS_CERT: "/app/certs/messaging/messaging.crt"
       AUDIT_TLS_KEY: "/app/certs/messaging/messaging.key"
       AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
+      AUDIT_SPOOL_DIR: "/app/audit-spool/messaging"
     depends_on:
       app-db:
         condition: service_healthy
@@ -117,6 +122,9 @@ services:
       - type: bind
         source: ./secureChat.sh
         target: /app/secureChat.sh
+      - type: volume
+        source: audit-spool
+        target: /app/audit-spool
     command: [ "bash", "./secureChat.sh", "run", "messaging" ]
 
   file:
@@ -247,5 +255,6 @@ services:
 volumes:
   app-data:
   audit-data:
+  audit-spool:
   auth-keys:
   file-storage:

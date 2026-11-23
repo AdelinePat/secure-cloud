@@ -7,19 +7,33 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
+#include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace common::audit {
 namespace {
@@ -28,7 +42,14 @@ namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace ssl = asio::ssl;
+namespace fs = std::filesystem;
 using tcp = asio::ip::tcp;
+using Clock = std::chrono::steady_clock;
+
+constexpr const char* kDeadDir = "dead";
+constexpr const char* kLockFile = ".lock";
+constexpr const char* kSpoolExt = ".json";
+constexpr const char* kTempExt = ".tmp";
 
 std::string env(const char* name, const std::string& fallback) {
   const char* value = std::getenv(name);
@@ -108,6 +129,7 @@ nlohmann::json makePayload(const Config& config, const Event& event,
   body["event_type"] = event.event_type;
   body["service_name"] = config.service_name;
   body["outcome"] = event.outcome;
+  // Captured now, not at delivery time: a spooled event may be sent much later.
   body["occurred_at"] = event.occurred_at.value_or(nowIso8601());
 
   if (event.actor_id.has_value() && !event.actor_id->empty()) {
@@ -167,19 +189,227 @@ bool parseUrl(const std::string& url, Endpoint& endpoint) {
   return !endpoint.host.empty() && !endpoint.port.empty();
 }
 
+// ── spool file helpers ─────────────────────────────────────────────────────
+
+std::string errnoText() { return std::strerror(errno); }
+
+bool fsyncPath(const fs::path& path, int flags) {
+  const int fd = ::open(path.c_str(), flags | O_CLOEXEC);
+  if (fd < 0) return false;
+  const bool ok = ::fsync(fd) == 0;
+  ::close(fd);
+  return ok;
+}
+
+// Writes `content` to `target` atomically and durably: a crash leaves either
+// no file or the complete file, never a truncated one.
+bool writeFileDurable(const fs::path& target, const std::string& content,
+                      std::string& error) {
+  const fs::path temp = fs::path(target).concat(kTempExt);
+  const int fd = ::open(temp.c_str(),
+                        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    error = "open " + temp.string() + ": " + errnoText();
+    return false;
+  }
+
+  const char* data = content.data();
+  std::size_t left = content.size();
+  while (left > 0) {
+    const ssize_t written = ::write(fd, data, left);
+    if (written < 0) {
+      if (errno == EINTR) continue;
+      error = "write " + temp.string() + ": " + errnoText();
+      ::close(fd);
+      ::unlink(temp.c_str());
+      return false;
+    }
+    data += written;
+    left -= static_cast<std::size_t>(written);
+  }
+
+  if (::fsync(fd) != 0) {
+    error = "fsync " + temp.string() + ": " + errnoText();
+    ::close(fd);
+    ::unlink(temp.c_str());
+    return false;
+  }
+  ::close(fd);
+
+  if (::rename(temp.c_str(), target.c_str()) != 0) {
+    error = "rename " + temp.string() + ": " + errnoText();
+    ::unlink(temp.c_str());
+    return false;
+  }
+
+  // Persist the directory entry created by rename().
+  if (!fsyncPath(target.parent_path(), O_RDONLY | O_DIRECTORY)) {
+    error = "fsync dir " + target.parent_path().string() + ": " + errnoText();
+    // The file exists and is complete; only its persistence is uncertain.
+  }
+  return true;
+}
+
+// Spool names are "<20-digit sequence>-<event_id>.json" so that a plain
+// lexicographic sort restores emit order after a restart.
+std::string spoolFileName(std::uint64_t sequence, const std::string& id) {
+  char prefix[32];
+  std::snprintf(prefix, sizeof(prefix), "%020llu",
+                static_cast<unsigned long long>(sequence));
+  return std::string(prefix) + '-' + id + kSpoolExt;
+}
+
+std::optional<std::uint64_t> spoolSequence(const std::string& name) {
+  if (name.size() < 21 || name[20] != '-') return std::nullopt;
+  std::uint64_t value = 0;
+  for (std::size_t i = 0; i < 20; ++i) {
+    if (!std::isdigit(static_cast<unsigned char>(name[i]))) return std::nullopt;
+    value = value * 10 + static_cast<std::uint64_t>(name[i] - '0');
+  }
+  return value;
+}
+
+enum class Delivery { Delivered, Retry, Rejected };
+
 }  // namespace
 
 struct Client::Impl {
+  struct Pending {
+    std::string id;
+    std::string event_type;
+    std::string payload;
+    fs::path file;  // empty in memory mode
+  };
+
   Config config;
   bool ready = false;
+  bool durable = false;
   Endpoint endpoint;
   std::string host_header;
   ssl::context ssl_context{ssl::context::tls_client};
-  std::mutex mutex;
+
+  // Spool state. spool_mutex serialises emit() so the spool sequence and the
+  // in-memory queue order always agree.
+  fs::path spool_dir;
+  fs::path dead_dir;
+  int lock_fd = -1;
+  std::uint64_t next_sequence = 1;
+  std::mutex spool_mutex;
+  std::size_t dropped = 0;
+
+  // Queue shared with the worker.
+  mutable std::mutex mutex;
+  std::condition_variable wake;  // worker: new event or stop
+  std::condition_variable idle;  // flush(): queue drained
+  std::deque<Pending> queue;
+  bool stopping = false;
+  Clock::time_point drain_deadline{};
+  std::thread worker;
+
+  ~Impl();
+
+  void openSpool();
+  void recoverSpool();
+  void run();
+  Delivery deliver(const Pending& item, std::string& detail);
+  void finish(const Pending& item, Delivery result, const std::string& detail);
 
   bool post(const std::string& body, const std::string& request_id,
             int& status, std::string& error);
 };
+
+Client::Impl::~Impl() {
+  if (lock_fd >= 0) ::close(lock_fd);
+}
+
+void Client::Impl::openSpool() {
+  if (config.spool_dir.empty()) {
+    std::cerr << "[audit-emit] AUDIT_SPOOL_DIR not set; queue is in memory "
+                 "only, pending events are lost on shutdown\n";
+    return;
+  }
+
+  try {
+    spool_dir = fs::path(config.spool_dir);
+    dead_dir = spool_dir / kDeadDir;
+    fs::create_directories(dead_dir);
+    fs::permissions(spool_dir, fs::perms::owner_all, fs::perm_options::replace);
+  } catch (const std::exception& exception) {
+    std::cerr << "[audit-emit] cannot create spool " << config.spool_dir
+              << " (" << exception.what() << "); falling back to memory\n";
+    return;
+  }
+
+  const fs::path lock_path = spool_dir / kLockFile;
+  lock_fd = ::open(lock_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  if (lock_fd < 0) {
+    std::cerr << "[audit-emit] cannot open " << lock_path << " ("
+              << errnoText() << "); falling back to memory\n";
+    return;
+  }
+  if (::flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+    std::cerr << "[audit-emit] spool " << spool_dir
+              << " is used by another process; falling back to memory\n";
+    ::close(lock_fd);
+    lock_fd = -1;
+    return;
+  }
+
+  durable = true;
+  recoverSpool();
+}
+
+// Loads events left by a previous process, in their original order.
+void Client::Impl::recoverSpool() {
+  std::vector<fs::path> files;
+  for (const auto& entry : fs::directory_iterator(spool_dir)) {
+    if (!entry.is_regular_file()) continue;
+    const fs::path& path = entry.path();
+    const std::string name = path.filename().string();
+
+    if (path.extension() == kTempExt) {
+      // Interrupted write: emit() never returned true for it.
+      std::error_code ignored;
+      fs::remove(path, ignored);
+      continue;
+    }
+    if (path.extension() == kSpoolExt && spoolSequence(name)) {
+      files.push_back(path);
+    }
+  }
+  std::sort(files.begin(), files.end());
+
+  for (const auto& path : files) {
+    const std::string name = path.filename().string();
+    next_sequence = std::max(next_sequence, *spoolSequence(name) + 1);
+
+    std::ifstream input(path, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(input)),
+                        std::istreambuf_iterator<char>());
+    const auto json = nlohmann::json::parse(content, nullptr, false);
+
+    if (json.is_discarded() || !json.is_object() ||
+        !json.contains("event_id") || !json["event_id"].is_string()) {
+      std::error_code ignored;
+      fs::rename(path, dead_dir / path.filename(), ignored);
+      std::cerr << "[audit-emit] unreadable spool file " << name
+                << " moved to dead/\n";
+      continue;
+    }
+
+    queue.push_back(Pending{
+        json["event_id"].get<std::string>(),
+        json.value("event_type", std::string()),
+        std::move(content),
+        path,
+    });
+  }
+
+  if (!queue.empty()) {
+    std::cerr << "[audit-emit] recovered " << queue.size()
+              << " pending event(s) from " << spool_dir << '\n';
+  }
+}
 
 Client::Client(Config config) : impl_(std::make_unique<Impl>()) {
   impl_->config = std::move(config);
@@ -217,15 +447,61 @@ Client::Client(Config config) : impl_(std::make_unique<Impl>()) {
     }
   }
 
+  try {
+    impl_->openSpool();
+  } catch (const std::exception& exception) {
+    // Recovery failed half-way: keep what was loaded, stay durable for new
+    // events if the directory itself is usable.
+    std::cerr << "[audit-emit] spool recovery error (" << exception.what()
+              << ")\n";
+  }
+
   impl_->ready = true;
+  impl_->worker = std::thread([impl = impl_.get()] { impl->run(); });
 }
 
-Client::~Client() = default;
+Client::~Client() {
+  if (!impl_ || !impl_->worker.joinable()) return;
+
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->stopping = true;
+    impl_->drain_deadline =
+        Clock::now() +
+        std::chrono::milliseconds(impl_->config.shutdown_drain_ms);
+  }
+  impl_->wake.notify_all();
+  impl_->worker.join();
+
+  const std::size_t left = impl_->queue.size();
+  if (left > 0) {
+    std::cerr << "[audit-emit] " << left << " event(s) not delivered at "
+              << "shutdown; "
+              << (impl_->durable ? "kept in the spool for the next start"
+                                 : "LOST (no spool directory)")
+              << '\n';
+  }
+}
 
 bool Client::enabled() const { return impl_ != nullptr && impl_->ready; }
 
+bool Client::durable() const { return enabled() && impl_->durable; }
+
 const std::string& Client::serviceName() const {
   return impl_->config.service_name;
+}
+
+std::size_t Client::pending() const {
+  if (!enabled()) return 0;
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->queue.size();
+}
+
+bool Client::flush(std::chrono::milliseconds timeout) {
+  if (!enabled()) return true;
+  std::unique_lock<std::mutex> lock(impl_->mutex);
+  return impl_->idle.wait_for(lock, timeout,
+                              [this] { return impl_->queue.empty(); });
 }
 
 bool Client::emit(const Event& event) {
@@ -237,48 +513,138 @@ bool Client::emit(const Event& event) {
     return false;
   }
 
-  std::lock_guard<std::mutex> lock(impl_->mutex);
+  try {
+    Impl::Pending item;
+    item.id = uuidV4();
+    item.event_type = event.event_type;
+    item.payload = makePayload(impl_->config, event, item.id).dump();
 
-  const std::string id = uuidV4();
-  const std::string payload =
-      makePayload(impl_->config, event, id).dump();
+    std::lock_guard<std::mutex> spool_lock(impl_->spool_mutex);
 
-  std::string error;
-  int status = 0;
-
-  for (int attempt = 1; attempt <= impl_->config.max_attempts; ++attempt) {
-    if (attempt > 1) {
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(100 * (attempt - 1)));
+    {
+      std::lock_guard<std::mutex> lock(impl_->mutex);
+      if (impl_->queue.size() >= impl_->config.max_pending) {
+        ++impl_->dropped;
+        std::cerr << "[audit-emit] queue full (" << impl_->queue.size()
+                  << " pending), DROPPED event type=" << event.event_type
+                  << " total_dropped=" << impl_->dropped << '\n';
+        return false;
+      }
     }
 
-    status = 0;
-    error.clear();
-
-    if (!impl_->post(payload, id, status, error)) {
-      // Transport failure: retry with the same event_id.
-      continue;
+    if (impl_->durable) {
+      const fs::path file =
+          impl_->spool_dir /
+          spoolFileName(impl_->next_sequence++, item.id);
+      std::string error;
+      if (!writeFileDurable(file, item.payload, error)) {
+        // Disk problem: still try to deliver it from memory.
+        std::cerr << "[audit-emit] spool write failed (" << error
+                  << "); event_id=" << item.id << " queued in memory only\n";
+      } else {
+        item.file = file;
+      }
     }
 
-    if (status == 200 || status == 201) return true;
-
-    if (status == 409 || status >= 500) {
-      // Chain contention or the audit store is temporarily unavailable.
-      continue;
+    {
+      std::lock_guard<std::mutex> lock(impl_->mutex);
+      impl_->queue.push_back(std::move(item));
     }
-
-    // 4xx: retrying will not help (bad config, forbidden identity, ...).
-    std::cerr << "[audit-emit] rejected event_id=" << id
-              << " type=" << event.event_type << " status=" << status
-              << " body=" << error << '\n';
+    impl_->wake.notify_one();
+    return true;
+  } catch (const std::exception& exception) {
+    std::cerr << "[audit-emit] emit failed (" << exception.what() << ")\n";
     return false;
   }
+}
 
-  std::cerr << "[audit-emit] failed event_id=" << id
-            << " type=" << event.event_type
-            << " service=" << impl_->config.service_name
-            << " status=" << status << " error=" << error << '\n';
-  return false;
+// ── worker ─────────────────────────────────────────────────────────────────
+
+void Client::Impl::run() {
+  auto backoff = std::chrono::milliseconds(config.retry_initial_ms);
+  bool failing = false;
+
+  std::unique_lock<std::mutex> lock(mutex);
+  for (;;) {
+    wake.wait(lock, [this] { return stopping || !queue.empty(); });
+    if (queue.empty()) break;  // stopping, nothing left
+    if (stopping && Clock::now() >= drain_deadline) break;
+
+    // Only this thread pops, so the head stays valid while unlocked.
+    const Pending item = queue.front();
+    lock.unlock();
+
+    std::string detail;
+    const Delivery result = deliver(item, detail);
+
+    if (result != Delivery::Retry) {
+      finish(item, result, detail);
+      lock.lock();
+      queue.pop_front();
+      if (queue.empty()) idle.notify_all();
+
+      if (failing) {
+        failing = false;
+        std::cerr << "[audit-emit] audit service reachable again; "
+                  << queue.size() << " event(s) still pending\n";
+      }
+      backoff = std::chrono::milliseconds(config.retry_initial_ms);
+      continue;
+    }
+
+    lock.lock();
+    if (!failing) {
+      failing = true;
+      std::cerr << "[audit-emit] delivery failed (" << detail << "); "
+                << queue.size() << " event(s) pending, retrying"
+                << (durable ? " from the spool" : " from memory") << '\n';
+    }
+    if (stopping) break;  // keep it for the next start
+
+    wake.wait_for(lock, backoff, [this] { return stopping; });
+    backoff = std::min(backoff * 2,
+                       std::chrono::milliseconds(config.retry_max_ms));
+  }
+}
+
+Delivery Client::Impl::deliver(const Pending& item, std::string& detail) {
+  int status = 0;
+  std::string error;
+
+  if (!post(item.payload, item.id, status, error)) {
+    detail = "transport: " + error;
+    return Delivery::Retry;
+  }
+  if (status == 200 || status == 201) return Delivery::Delivered;
+
+  detail = "status " + std::to_string(status) + ": " + error;
+  if (status == 408 || status == 409 || status == 429 || status >= 500) {
+    return Delivery::Retry;
+  }
+  return Delivery::Rejected;
+}
+
+void Client::Impl::finish(const Pending& item, Delivery result,
+                          const std::string& detail) {
+  if (result == Delivery::Rejected) {
+    std::cerr << "[audit-emit] rejected event_id=" << item.id
+              << " type=" << item.event_type << " (" << detail << ")"
+              << (item.file.empty() ? "; dropped" : "; moved to dead/")
+              << '\n';
+  }
+  if (item.file.empty()) return;
+
+  std::error_code error;
+  if (result == Delivery::Delivered) {
+    fs::remove(item.file, error);
+  } else {
+    fs::rename(item.file, dead_dir / item.file.filename(), error);
+  }
+  if (error) {
+    // Worst case the event is re-sent after a restart: idempotent server-side.
+    std::cerr << "[audit-emit] spool cleanup failed for " << item.file
+              << " (" << error.message() << ")\n";
+  }
 }
 
 bool Client::Impl::post(const std::string& body, const std::string& request_id,
@@ -345,6 +711,10 @@ bool Client::Impl::post(const std::string& body, const std::string& request_id,
       error = response.body().substr(0, 300);
     }
     return true;
+  } catch (const boost::system::system_error& exception) {
+    // what() embeds the Boost source location; the message alone is enough.
+    error = exception.code().message();
+    return false;
   } catch (const std::exception& exception) {
     error = exception.what();
     return false;
@@ -364,7 +734,16 @@ Config Config::fromEnv(std::string default_service_name) {
   config.ca_path = env("AUDIT_TLS_CA", "/app/certs/ca/ca.crt");
 
   config.timeout_ms = std::clamp(envInt("AUDIT_TIMEOUT_MS", 750), 50, 10000);
-  config.max_attempts = std::clamp(envInt("AUDIT_MAX_ATTEMPTS", 2), 1, 5);
+
+  config.spool_dir = env("AUDIT_SPOOL_DIR", "");
+  config.max_pending = static_cast<std::size_t>(
+      std::clamp(envInt("AUDIT_SPOOL_MAX_EVENTS", 10000), 1, 1000000));
+  config.retry_initial_ms =
+      std::clamp(envInt("AUDIT_RETRY_INITIAL_MS", 200), 10, 60000);
+  config.retry_max_ms = std::clamp(envInt("AUDIT_RETRY_MAX_MS", 30000),
+                                   config.retry_initial_ms, 600000);
+  config.shutdown_drain_ms =
+      std::clamp(envInt("AUDIT_SHUTDOWN_DRAIN_MS", 2000), 0, 60000);
   return config;
 }
 
