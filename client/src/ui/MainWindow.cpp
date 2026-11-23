@@ -3,9 +3,11 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSplitter>
@@ -14,8 +16,11 @@
 #include <QUuid>
 #include <QVBoxLayout>
 #include <exception>
+#include <optional>
 #include <utility>
 
+#include "crypto/IdentityKeyStore.hpp"
+#include "crypto/KeyManager.hpp"
 #include "crypto/MessageCrypto.hpp"
 #include "network/dto/SendMessageRequest.hpp"
 #include "ui/MessageStatusMapper.hpp"
@@ -31,7 +36,7 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   resize(900, 600);
 
   // Generate a temporary encryption key for local integration testing
-  randombytes_buf(testSessionKey_.data(), testSessionKey_.size());
+  randombytes_buf(sessionKey_.data(), sessionKey_.size());
 
   // Create the stacked widget to manage application pages.
   stackedWidget_ = new QStackedWidget(this);
@@ -139,10 +144,10 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
             sendButton_->setEnabled(current != nullptr);
             messageInput_->setEnabled(current != nullptr);
 
-            // Affiche les messages déjà présents en mémoire
+            // Show messages allready in memory
             refreshMessages();
 
-            // Récupère l'historique depuis le serveur
+            // Get back history from server
             if (!currentConversationId_.isEmpty() && !accessToken_.isEmpty()) {
               messageService_.getMessageHistory(currentConversationId_,
                                                 accessToken_);
@@ -406,10 +411,87 @@ void MainWindow::onLoginClicked() {
       return;
     }
 
+    reply->deleteLater();
+
     resetConversations();
     currentUserId_ = userId;
     accessToken_ = accessToken;
     refreshToken_ = refreshToken;
+
+    try {
+      const bool identityExists =
+          crypto::IdentityKeyStore::exists(currentUserId_);
+
+      qDebug() << "Local cryptographic identity exists:" << identityExists;
+
+      if (!identityExists) {
+        bool accepted = false;
+
+        const QString passphrase = QInputDialog::getText(
+            this, "SecureChat - E2EE Identity",
+            "Choose a passphrase to protect your private key:",
+            QLineEdit::Password, QString(), &accepted);
+
+        if (!accepted || passphrase.isEmpty()) {
+          qDebug() << "Identity creation cancelled";
+          currentUserId_.clear();
+          accessToken_.clear();
+          refreshToken_.clear();
+          return;
+        }
+
+        bool confirmed = false;
+
+        const QString confirmation = QInputDialog::getText(
+            this, "SecureChat - Confirm Passphrase",
+            "Confirm your passphrase:", QLineEdit::Password, QString(),
+            &confirmed);
+
+        if (!confirmed || confirmation != passphrase) {
+          qWarning() << "Passphrase confirmation failed";
+          currentUserId_.clear();
+          accessToken_.clear();
+          refreshToken_.clear();
+          return;
+        }
+        const crypto::KeyPair keyPair = crypto::KeyManager::generateKeyPair();
+
+        crypto::IdentityKeyStore::save(currentUserId_, keyPair, passphrase);
+
+        identityKeyPair_ = keyPair;
+      } else {
+        qDebug() << "Existing cryptographic identity detected";
+        bool accepted = false;
+
+        const QString passphrase = QInputDialog::getText(
+            this, "SecureChat - Unlock Identity",
+            "Enter your identity passphrase:", QLineEdit::Password, QString(),
+            &accepted);
+        if (!accepted || passphrase.isEmpty()) {
+          qDebug() << "Identity unlock cancelled";
+
+          currentUserId_.clear();
+          accessToken_.clear();
+          refreshToken_.clear();
+
+          return;
+        }
+        const crypto::KeyPair keyPair =
+            crypto::IdentityKeyStore::load(currentUserId_, passphrase);
+        identityKeyPair_ = keyPair;
+      }
+
+    } catch (const std::exception& e) {
+      QMessageBox::warning(this, "SecureChat - Identity Error",
+                           "Unable to unlock your cryptographic identity.\n"
+                           "Please check your passphrase and try again.");
+      qWarning() << "Failed to check local identity:" << e.what();
+      currentUserId_.clear();
+      accessToken_.clear();
+      refreshToken_.clear();
+
+      return;
+    }
 
     refreshTimer_->start();
 
@@ -424,8 +506,6 @@ void MainWindow::onLoginClicked() {
     loadConversations();
 
     qDebug() << "Login successful for:" << username;
-
-    reply->deleteLater();
   });
 }
 
@@ -451,6 +531,8 @@ void MainWindow::refreshAccessToken() {
       setWindowTitle("SecureChat");
 
       resetConversations();
+      identityKeyPair_.reset();
+
       accessToken_.clear();
       refreshToken_.clear();
       refreshTimer_->stop();
@@ -627,7 +709,7 @@ void MainWindow::onSendClicked() {
   try {
     // Encrypt the message before sending it to the network layer
     crypto::EncryptedMessage encryptedMessage =
-        crypto::MessageCrypto::encrypt(message.toStdString(), testSessionKey_);
+        crypto::MessageCrypto::encrypt(message.toStdString(), sessionKey_);
 
     // Build the encrypted message request
     network::dto::SendMessageRequest request;

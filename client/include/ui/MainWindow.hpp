@@ -1,9 +1,9 @@
 #pragma once
 
 #include <QHash>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QLabel>
 #include <QMainWindow>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -57,7 +57,8 @@ class MainWindow : public QMainWindow {
   QLineEdit* conversationParticipantsInput_;
   QPushButton* createConversationButton_;
   QString currentConversationId_;
-  crypto::SessionKey testSessionKey_{};
+  std::optional<crypto::KeyPair> identityKeyPair_;
+  crypto::SessionKey sessionKey_{};
   network::HttpClient& httpClient_;
   QLineEdit* usernameInput_;
   QLineEdit* passwordInput_;
