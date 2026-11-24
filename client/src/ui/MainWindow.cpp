@@ -7,6 +7,7 @@
 #include <algorithm>
 #include "crypto/IdentityKeyStore.hpp"
 #include "crypto/KeyManager.hpp"
+#include "crypto/PeerTrustStore.hpp"
 #include <QDebug>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -107,6 +108,20 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   reloadConversationsButton_ =
       new QPushButton("Refresh conversations", chatPage_);
 
+  reloadConversationsButton_->setObjectName("reloadConversationsButton");
+  localFingerprintLabel_ = new QLabel(chatPage_);
+  localFingerprintLabel_->setObjectName("localFingerprintLabel");
+  localFingerprintLabel_->setTextFormat(Qt::PlainText);
+  localFingerprintLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                                  Qt::TextSelectableByKeyboard);
+  localFingerprintLabel_->setWordWrap(true);
+  peerTrustLabel_ = new QLabel(chatPage_);
+  peerTrustLabel_->setObjectName("peerTrustLabel");
+  peerTrustLabel_->setTextFormat(Qt::PlainText);
+  peerTrustLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                          Qt::TextSelectableByKeyboard);
+  peerTrustLabel_->setWordWrap(true);
+
   auto* sidebar = new QWidget(chatPage_);
   auto* sidebarLayout = new QVBoxLayout(sidebar);
   sidebarLayout->addWidget(new QLabel("Conversations", sidebar));
@@ -115,6 +130,8 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   auto* conversationPanel = new QWidget(chatPage_);
   auto* panelLayout = new QVBoxLayout(conversationPanel);
   panelLayout->addWidget(conversationTitle_);
+  panelLayout->addWidget(localFingerprintLabel_);
+  panelLayout->addWidget(peerTrustLabel_);
   panelLayout->addWidget(messageView_);
   panelLayout->addLayout(inputLayout);
   auto* splitter = new QSplitter(chatPage_);
@@ -155,6 +172,8 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
             sendButton_->setEnabled(false);
             messageInput_->setEnabled(current != nullptr);
 
+            peerTrustLabel_->setText(peerTrustDetails_.value(currentConversationId_));
+
             // Show cached messages for the selected conversation.
             refreshMessages();
 
@@ -164,7 +183,10 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
             }
           });
   connect(reloadConversationsButton_, &QPushButton::clicked, this,
-          &MainWindow::loadConversations);
+          [this] {
+            loadPeerKey(currentConversationId_, true);
+            loadConversations();
+          });
 
   // Register both pages.
   stackedWidget_->addWidget(loginPage_);
@@ -248,10 +270,6 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
         if (!conversationList_->currentItem() &&
             conversationList_->count() > 0) {
           conversationList_->setCurrentRow(0);
-        } else if (historyTimer_->isActive()) {
-          requestActiveHistory();
-        } else {
-          loadPeerKey(currentConversationId_);
         }
         statusBar()->showMessage(
             conversationList_->count() == 0
@@ -337,7 +355,7 @@ void MainWindow::onLoginClicked() {
     reply->deleteLater();
     resetConversations();
     loginButton_->setEnabled(false);
-    currentUserId_ = userId;
+    currentUserId_ = QUuid(userId).toString(QUuid::WithoutBraces);
     accessToken_ = accessToken;
     refreshToken_ = refreshToken;
 
@@ -391,6 +409,8 @@ void MainWindow::onLoginClicked() {
       return;
     }
     const auto& pk = identityKeyPair_->publicKey;
+    localFingerprintLabel_->setText("Your SHA-256 fingerprint: " +
+                                    crypto::PeerTrustStore::fingerprint(pk));
     const QString encoded = QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(pk.data()), pk.size()).toBase64());
     auto* publication = httpClient_.publishIdentity(accessToken_, encoded);
     connect(publication, &QNetworkReply::finished, this, [this, publication, username]() {
@@ -515,6 +535,9 @@ void MainWindow::resetConversations() {
   clearCrypto();
   currentUserId_.clear();
   currentConversationId_.clear();
+  peerTrustDetails_.clear();
+  localFingerprintLabel_->clear();
+  peerTrustLabel_->clear();
   conversationList_->clear();
   messages_.clear();
   conversationMessageOrder_.clear();
@@ -654,13 +677,28 @@ void MainWindow::clearCrypto() {
   conversationKeys_.clear();
 }
 
-void MainWindow::loadPeerKey(const QString& id) {
+void MainWindow::clearConversationKeys(const QString& id) {
+  auto entry = conversationKeys_.find(id);
+  if (entry != conversationKeys_.end()) {
+    sodium_memzero(&entry->keys, sizeof(entry->keys));
+    conversationKeys_.erase(entry);
+  }
+}
+
+void MainWindow::loadPeerKey(const QString& id, bool revalidate) {
   if (!identityKeyPair_ || accessToken_.isEmpty() || id.isEmpty() ||
-      id != currentConversationId_ || peerKeyPending_) {
+      id != currentConversationId_ || (peerKeyPending_ && !revalidate)) {
     return;
   }
+  // Invalidate earlier history replies before requesting a fresh peer key.
+  historyTimer_->stop();
+  ++selectionGeneration_;
+  clearConversationKeys(id);
   peerKeyPending_ = true;
   sendButton_->setEnabled(false);
+  if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
+    peerTrustLabel_->setText("Checking peer identity...");
+  }
   const auto session = sessionGeneration_;
   const auto selection = selectionGeneration_;
   auto* reply = httpClient_.getPeerKey(accessToken_, id);
@@ -671,12 +709,29 @@ void MainWindow::loadPeerKey(const QString& id) {
     try {
       if (reply->error() != QNetworkReply::NoError) throw std::runtime_error("Peer key unavailable");
       const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
-      const auto peer = obj.value("user_id").toString();
+      const QUuid peerUuid(obj.value("user_id").toString());
+      const auto peer = peerUuid.toString(QUuid::WithoutBraces);
       const auto bytes = QByteArray::fromBase64(obj.value("public_key").toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-      if (QUuid(peer).isNull() || peer == currentUserId_ || bytes.size() != crypto_kx_PUBLICKEYBYTES)
+      if (peerUuid.isNull() || peer == currentUserId_ || bytes.size() != crypto_kx_PUBLICKEYBYTES)
         throw std::runtime_error("Invalid peer key");
       crypto::PublicKey pk;
       std::copy(bytes.begin(), bytes.end(), pk.begin());
+      const auto trust = crypto::PeerTrustStore::checkOrPin(
+          currentUserId_, id, peer, pk);
+      using TrustStatus = crypto::PeerTrustStore::Status;
+      if (trust.status != TrustStatus::Trusted) {
+        const QString reason = trust.status == TrustStatus::PeerMismatch
+            ? "conversation peer changed" : "peer key changed";
+        const auto warning = QString(
+            "E2EE blocked: %1. Verify the peer through a separate channel.\n"
+            "Expected: %2\nSHA-256: %3\nPresented: %4\nSHA-256: %5")
+            .arg(reason, trust.expectedPeer, trust.expectedFingerprint,
+                 peer, trust.presentedFingerprint);
+        peerTrustDetails_.insert(id, warning);
+        peerTrustLabel_->setText(warning);
+        return;
+      }
+
       const auto& own = *identityKeyPair_;
       // Stable role ordering gives matching transmit and receive keys.
       auto keys = currentUserId_ < peer ?
@@ -693,14 +748,23 @@ void MainWindow::loadPeerKey(const QString& id) {
       }
       conversationKeys_.insert(id, ConversationKeys{peer, keys});
       sodium_memzero(&keys, sizeof(keys));
+      const auto details = QString("Peer: %1\nSHA-256: %2")
+          .arg(peer, trust.expectedFingerprint);
+      peerTrustDetails_.insert(id, details);
+      peerTrustLabel_->setText(details);
       sendButton_->setEnabled(true);
       historyTimer_->start();
       requestActiveHistory();
     } catch (const std::exception& e) {
-      conversationKeys_.remove(id);
-      sendButton_->setEnabled(false);
-      statusBar()->showMessage("E2EE unavailable: " + QString::fromUtf8(e.what()));
+      if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
+        const auto warning = "E2EE unavailable: " + QString::fromUtf8(e.what());
+        peerTrustDetails_.insert(id, warning);
+        peerTrustLabel_->setText(warning);
+      }
     }
+  });
+  QTimer::singleShot(15000, reply, [reply] {
+    if (reply->isRunning()) reply->abort();
   });
 }
 

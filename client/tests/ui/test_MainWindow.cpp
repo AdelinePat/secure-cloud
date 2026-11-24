@@ -6,6 +6,8 @@
 #include <QInputDialog>
 #include <QApplication>
 #include <QStandardPaths>
+#include <QUuid>
+#include "crypto/PeerTrustStore.hpp"
 #include "crypto/KeyManager.hpp"
 #include "crypto/MessageCrypto.hpp"
 #include <QJsonObject>
@@ -30,6 +32,12 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(sodium_init() >= 0);
   QStandardPaths::setTestModeEnabled(true);
   const auto peer = crypto::KeyManager::generateKeyPair();
+  const auto replacement = crypto::KeyManager::generateKeyPair();
+  const auto localId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const QString peerId = "550e8400-e29b-41d4-a716-446655440001";
+  const QString otherPeerId = "550e8400-e29b-41d4-a716-446655440002";
+  auto offeredPeer = peerId;
+  auto offeredKey = peer.publicKey;
   bool passphrasePromptShown = false;
   QTimer dialogTimer;
   connect(&dialogTimer, &QTimer::timeout, this, [&] {
@@ -76,8 +84,9 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
         requests.append(request);
         QByteArray body;
         if (request.startsWith("POST /auth/login ")) {
-          body =
-              R"({"user_id":"550e8400-e29b-41d4-a716-446655440000","access_token":"jwt-first","refresh_token":"refresh-first"})";
+          body = QJsonDocument(QJsonObject{
+              {"user_id", localId}, {"access_token", "jwt-first"},
+              {"refresh_token", "refresh-first"}}).toJson();
         } else if (request.startsWith("POST /auth/refresh ")) {
           if (rejectRefresh) {
             respond(socket, "{}", "401 Unauthorized");
@@ -94,8 +103,10 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
           }
           body = R"({"status":"ok"})";
         } else if (request.contains("/peer-key HTTP/1.1")) {
-          const auto key = QByteArray(reinterpret_cast<const char*>(peer.publicKey.data()), peer.publicKey.size()).toBase64();
-          body = QJsonDocument(QJsonObject{{"user_id", "550e8400-e29b-41d4-a716-446655440001"}, {"public_key", QString::fromLatin1(key)}}).toJson();
+          const auto key = QByteArray(reinterpret_cast<const char*>(offeredKey.data()),
+                                      offeredKey.size()).toBase64();
+          body = QJsonDocument(QJsonObject{{"user_id", offeredPeer},
+                                         {"public_key", QString::fromLatin1(key)}}).toJson();
         } else if (request.startsWith("GET /messaging/conversations ")) {
           body = R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"}])";
         } else if (request.startsWith("GET /messaging/conversations/c/messages ")) {
@@ -191,12 +202,19 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(historyTimer);
   QCOMPARE(historyTimer->interval(), 3000);
   QVERIFY(identityPublished);
+  auto* ownFingerprint = window.findChild<QLabel*>("localFingerprintLabel");
+  QVERIFY(ownFingerprint);
+  QVERIFY(ownFingerprint->text().contains(
+      crypto::PeerTrustStore::fingerprint(clientPublicKey)));
   QTRY_VERIFY(historyTimer->isActive());
   QTRY_VERIFY(groupHistoryRequests >= 1);
 
   // Simulate the peer encrypting a message for the selected conversation.
-  const auto keys = crypto::KeyManager::deriveServerSessionKeys(
-      peer.publicKey, peer.privateKey, clientPublicKey);
+  const auto keys = localId < peerId
+      ? crypto::KeyManager::deriveServerSessionKeys(
+            peer.publicKey, peer.privateKey, clientPublicKey)
+      : crypto::KeyManager::deriveClientSessionKeys(
+            peer.publicKey, peer.privateKey, clientPublicKey);
   crypto::SessionKey conversationTx{};
   QCOMPARE(crypto_generichash(conversationTx.data(), conversationTx.size(),
                             reinterpret_cast<const unsigned char*>("c"), 1,
@@ -209,7 +227,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
         QByteArray(reinterpret_cast<const char*>(bytes.data()), bytes.size()).toBase64());
   };
   const QJsonObject message{{"message_id", "automatic-1"},
-                            {"user_id", "550e8400-e29b-41d4-a716-446655440001"},
+                            {"user_id", peerId},
                             {"encryption_version", 2},
                             {"nonce", encode(encrypted.nonce)},
                             {"ciphertext", encode(encrypted.ciphertext)}};
@@ -230,6 +248,50 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   holdNextHistory = true;
   QTRY_VERIFY_WITH_TIMEOUT(heldHistory, 4500);
   QCOMPARE(view->toPlainText().count(plaintext), 1);
+  QVERIFY(!passphrasePromptShown);
+
+  // Refresh must check the peer while an old history reply is still in flight.
+  auto* reload = window.findChild<QPushButton*>("reloadConversationsButton");
+  auto* trustLabel = window.findChild<QLabel*>("peerTrustLabel");
+  QVERIFY(reload && trustLabel);
+  QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(peer.publicKey)));
+  offeredKey = replacement.publicKey;
+  reload->click();
+  QVERIFY(!send->isEnabled());
+  QVERIFY(!historyTimer->isActive());
+  QTRY_VERIFY(trustLabel->text().contains("peer key changed"));
+  QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(peer.publicKey)));
+  QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(offeredKey)));
+  auto staleMessage = message;
+  staleMessage.insert("message_id", "stale-history");
+  const auto staleHistory = QJsonDocument(
+      QJsonObject{{"messages", QJsonArray{staleMessage}}}).toJson();
+  respond(heldHistory, staleHistory, "200 OK");
+  QTRY_VERIFY(heldHistory.isNull());
+  const int blockedCount = groupHistoryRequests;
+  QTest::qWait(historyTimer->interval() + 200);
+  QCOMPARE(groupHistoryRequests, blockedCount);
+  QCOMPARE(view->toPlainText().count(plaintext), 1);
+  QVERIFY(trustLabel->text().contains("peer key changed"));
+
+  // The original key under a different UUID must also be rejected.
+  offeredKey = peer.publicKey;
+  offeredPeer = otherPeerId;
+  QTRY_VERIFY(reload->isEnabled());
+  reload->click();
+  QTRY_VERIFY(trustLabel->text().contains("conversation peer changed"));
+  QVERIFY(trustLabel->text().contains(peerId));
+  QVERIFY(trustLabel->text().contains(otherPeerId));
+  QVERIFY(!historyTimer->isActive());
+
+  offeredPeer = peerId;
+  QTRY_VERIFY(reload->isEnabled());
+  holdNextHistory = true;
+  reload->click();
+  QTRY_VERIFY(send->isEnabled());
+  QTRY_VERIFY(heldHistory);
+  QVERIFY(historyTimer->isActive());
+  QVERIFY(!trustLabel->text().contains("blocked"));
   QVERIFY(!passphrasePromptShown);
 
   // A reply from the previous session must not repopulate the cleared chat.

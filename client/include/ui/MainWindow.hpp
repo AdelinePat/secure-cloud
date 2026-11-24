@@ -68,8 +68,12 @@ class MainWindow : public QMainWindow {
   std::optional<crypto::KeyPair> identityKeyPair_;
   struct ConversationKeys { QString peerId; crypto::SessionKeys keys; };
   QHash<QString, ConversationKeys> conversationKeys_;
-  void loadPeerKey(const QString& conversationId);
+  void loadPeerKey(const QString& conversationId, bool revalidate = false);
+  void clearConversationKeys(const QString& id);
   void clearCrypto();
+  QLabel* localFingerprintLabel_;
+  QLabel* peerTrustLabel_;
+  QHash<QString, QString> peerTrustDetails_;
   network::HttpClient& httpClient_;
   QLineEdit* usernameInput_;
   QLineEdit* passwordInput_;
