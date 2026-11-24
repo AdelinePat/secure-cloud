@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # List of real services — the single source of truth for "all"
 SERVICES=(auth audit file messaging gateway)
+# Everything build/test/clean "all" iterates over: services + shared libraries
+TARGETS=("${SERVICES[@]}" audit-client)
 
 # ==================== COLORS ====================
 BLUE='\033[0;34m'
@@ -27,6 +29,7 @@ source_dir() {
         file) echo "$SCRIPT_DIR/file" ;;
         messaging) echo "$SCRIPT_DIR/messaging" ;;
         gateway) echo "$SCRIPT_DIR/gateway" ;;
+        audit-client) echo "$SCRIPT_DIR/common/audit" ;;
     esac
 }
 
@@ -37,6 +40,7 @@ build_dir() {
         file) echo "$SCRIPT_DIR/file/build" ;;
         messaging) echo "$SCRIPT_DIR/messaging/build" ;;
         gateway) echo "$SCRIPT_DIR/gateway/build" ;;
+        audit-client) echo "$SCRIPT_DIR/common/audit/build" ;;
     esac
 }
 
@@ -47,6 +51,7 @@ test_target() {
         file)  echo "file_tests" ;;
         messaging)  echo "messaging_tests" ;;
         gateway) echo "gateway_tests" ;;
+        audit-client) echo "audit_client_tests" ;;
     esac
 }
 
@@ -60,7 +65,7 @@ cmd_build() {
     local target="${1:-all}"
 
     if [ "$target" == "all" ]; then
-        for s in "${SERVICES[@]}"; do
+        for s in "${TARGETS[@]}"; do
             cmd_build "$s"
         done
         return
@@ -85,7 +90,7 @@ cmd_test() {
     local target="${1:-all}"
 
     if [ "$target" == "all" ]; then
-        for s in "${SERVICES[@]}"; do
+        for s in "${TARGETS[@]}"; do
             cmd_test "$s"
         done
         return
@@ -125,7 +130,7 @@ cmd_clean() {
     local target="${1:-all}"
 
     if [ "$target" == "all" ]; then
-        for s in "${SERVICES[@]}"; do
+        for s in "${TARGETS[@]}"; do
             cmd_clean "$s"
         done
         return

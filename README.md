@@ -24,6 +24,12 @@ stop all services and delete volumes
 docker compose down -v
 ```
 
+This also deletes the JWT signing key (`auth-keys` volume): the one-shot
+`jwt-keys` service generates a new P-256 pair on the next `up`
+(`tools/ensure-jwt-keys.sh`) and publishes the public key to `messaging`
+through the `jwt-public` volume. Tokens issued before are then invalid, so
+log in again.
+
 Start a service
 
 ```bash

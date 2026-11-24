@@ -33,11 +33,34 @@ services:
         target: /app/secureChat.sh
     command: [ "bash", "./secureChat.sh", "run", "gateway" ]
 
+  # One-shot: creates the JWT key pair on first start (empty auth-keys volume)
+  # and publishes the public key to jwt-public. Re-runs on every `up`, keeps
+  # an existing private key.
+  jwt-keys:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: [ "sh", "/tools/ensure-jwt-keys.sh", "/keys/auth", "/keys/public" ]
+    restart: "no"
+    volumes:
+      - type: bind
+        source: ./tools/ensure-jwt-keys.sh
+        target: /tools/ensure-jwt-keys.sh
+        read_only: true
+      - type: volume
+        source: auth-keys
+        target: /keys/auth
+      - type: volume
+        source: jwt-public
+        target: /keys/public
+
   auth:
     build:
       context: .
       dockerfile: Dockerfile
     depends_on:
+      jwt-keys:
+        condition: service_completed_successfully
       app-db:
         condition: service_healthy
     environment:
@@ -56,6 +79,7 @@ services:
       AUDIT_TLS_CERT: "/app/certs/auth/auth.crt"
       AUDIT_TLS_KEY: "/app/certs/auth/auth.key"
       AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
+      AUDIT_SPOOL_DIR: "/app/audit-spool/auth"
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
@@ -75,6 +99,9 @@ services:
       - type: volume
         source: auth-keys
         target: /app/auth-keys
+      - type: volume
+        source: audit-spool
+        target: /app/audit-spool
     command: [ "bash", "./secureChat.sh", "run", "auth" ]
 
   messaging:
@@ -94,16 +121,21 @@ services:
       AUDIT_TLS_CERT: "/app/certs/messaging/messaging.crt"
       AUDIT_TLS_KEY: "/app/certs/messaging/messaging.key"
       AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
+      AUDIT_SPOOL_DIR: "/app/audit-spool/messaging"
     depends_on:
+      jwt-keys:
+        condition: service_completed_successfully
       app-db:
         condition: service_healthy
     volumes:
       - type: bind
         source: ./certs/ca/ca.crt
         target: /app/certs/ca/ca.crt
-      - type: bind
-        source: ./certs/jwt/public.pem
-        target: /app/jwt/public.pem
+      # Public key only (published by jwt-keys); the private key stays in
+      # auth-keys, which is mounted into auth alone.
+      - type: volume
+        source: jwt-public
+        target: /app/jwt
         read_only: true
       - type: bind
         source: ./certs/messaging
@@ -117,6 +149,9 @@ services:
       - type: bind
         source: ./secureChat.sh
         target: /app/secureChat.sh
+      - type: volume
+        source: audit-spool
+        target: /app/audit-spool
     command: [ "bash", "./secureChat.sh", "run", "messaging" ]
 
   file:
@@ -247,5 +282,7 @@ services:
 volumes:
   app-data:
   audit-data:
+  audit-spool:
   auth-keys:
+  jwt-public:
   file-storage:
