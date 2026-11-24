@@ -223,6 +223,16 @@ Build then run:
 ./client/run.sh
 ```
 
+. Build folders after docker compose down -v:
+
+down -v only deletes Docker volumes. The build/ folders are ordinary folders in your repo (mounted into the containers), so they stay.
+
+- Services: on up, `secureChat.sh run` skips the configure step when build.ninja exists and runs an incremental build. Ninja recompiles whatever changed, including after a branch switch, and new source files are picked up. That's normally correct, just not from scratch. The one trap is the one from before: if a service's build/ was configured on your machine, the container fails with the CMakeCache path error. For a truly clean build, run:
+  ```bash
+  docker compose run --rm --no-deps auth ./secureChat.sh clean # (the folders belong to root).
+  ```
+- Client: client/linux-build.sh always deletes client/build and rebuilds from scratch, so it's always clean.
+
 **WSL only:** if you get EGL/MESA rendering errors, add this to your `~/.bashrc` and restart your terminal:
 
 ```bash
