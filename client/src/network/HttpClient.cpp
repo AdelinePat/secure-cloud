@@ -112,4 +112,21 @@ QNetworkReply* HttpClient::createConversation(const QString& jwt,
   return networkManager_.post(networkRequest, body);
 }
 
+QNetworkReply* HttpClient::publishIdentity(const QString& jwt, const QString& publicKey) {
+  QUrl url = baseUrl_;
+  url.setPath("/messaging/identity-key");
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+  request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  return networkManager_.put(request, QJsonDocument(QJsonObject{{"public_key", publicKey}}).toJson(QJsonDocument::Compact));
+}
+
+QNetworkReply* HttpClient::getPeerKey(const QString& jwt, const QString& conversationId) {
+  QUrl url = baseUrl_;
+  url.setPath("/messaging/conversations/" + conversationId + "/peer-key");
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+  return networkManager_.get(request);
+}
+
 }  // namespace network

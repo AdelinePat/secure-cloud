@@ -135,9 +135,13 @@ http::response<http::string_body> HttpRouter::route(
       target.ends_with(messagesSuffix) &&
       target.size() > conversationsPath.size() + messagesSuffix.size() + 1;
 
-  if (isConversationRoute || isMessageRoute) {
-    const bool allowedMethod = request.method() == http::verb::post ||
-                               request.method() == http::verb::get;
+  const bool isIdentityRoute = target == "/messaging/identity-key";
+  const bool isPeerRoute = target.starts_with(conversationsPath + "/") &&
+                           target.ends_with("/peer-key");
+  if (isConversationRoute || isMessageRoute || isIdentityRoute || isPeerRoute) {
+    const bool allowedMethod = isIdentityRoute ? request.method() == http::verb::put :
+        isPeerRoute ? request.method() == http::verb::get :
+        (request.method() == http::verb::post || request.method() == http::verb::get);
 
     if (!allowedMethod) {
       http::response<http::string_body> response{

@@ -1,6 +1,10 @@
 #include <sodium.h>
 
 #include <QJsonDocument>
+#include <QInputDialog>
+#include <QApplication>
+#include <QStandardPaths>
+#include "crypto/KeyManager.hpp"
 #include <QJsonObject>
 #include <QStatusBar>
 #include <QTcpServer>
@@ -21,6 +25,16 @@ class TestMainWindow : public QObject {
 
 void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(sodium_init() >= 0);
+  QStandardPaths::setTestModeEnabled(true);
+  const auto peer = crypto::KeyManager::generateKeyPair();
+  QTimer dialogTimer;
+  connect(&dialogTimer, &QTimer::timeout, [] {
+    if (auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget())) {
+      dialog->setTextValue("test-only-passphrase");
+      dialog->accept();
+    }
+  });
+  dialogTimer.start(20);
   QTcpServer server;
   QVERIFY(server.listen(QHostAddress::LocalHost, 0));
   QList<QByteArray> requests;
@@ -49,6 +63,11 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
         } else if (request.startsWith("POST /auth/refresh ")) {
           body =
               R"({"access_token":"jwt-rotated","refresh_token":"refresh-rotated"})";
+        } else if (request.startsWith("PUT /messaging/identity-key ")) {
+          body = R"({"status":"ok"})";
+        } else if (request.contains("/peer-key HTTP/1.1")) {
+          const auto key = QByteArray(reinterpret_cast<const char*>(peer.publicKey.data()), peer.publicKey.size()).toBase64();
+          body = QJsonDocument(QJsonObject{{"user_id", "550e8400-e29b-41d4-a716-446655440001"}, {"public_key", QString::fromLatin1(key)}}).toJson();
         } else if (request.startsWith("GET /messaging/conversations ")) {
           body = R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"}])";
         } else if (request.startsWith("GET /messaging/conversations/") &&
@@ -85,7 +104,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
 
   QVERIFY(requests[1].contains("Authorization: Bearer jwt-first"));
   QCOMPARE(list->currentRow(), 0);
-  QVERIFY(send->isEnabled());
+  QTRY_VERIFY(send->isEnabled());
   input->setText("message A");
   send->click();
   input->setText("draft A");
@@ -93,6 +112,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(input->text().isEmpty());
   auto* view = window.findChild<QTextEdit*>();
   QVERIFY(view->toPlainText().isEmpty());
+  QTRY_VERIFY(send->isEnabled());
   input->setText("message B");
   send->click();
   input->setText("draft B");

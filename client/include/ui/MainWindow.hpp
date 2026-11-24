@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QLabel>
+#include <optional>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
@@ -58,7 +59,10 @@ class MainWindow : public QMainWindow {
   QPushButton* createConversationButton_;
   QString currentConversationId_;
   std::optional<crypto::KeyPair> identityKeyPair_;
-  crypto::SessionKey sessionKey_{};
+  struct ConversationKeys { QString peerId; crypto::SessionKeys keys; };
+  QHash<QString, ConversationKeys> conversationKeys_;
+  void loadPeerKey(const QString& conversationId);
+  void clearCrypto();
   network::HttpClient& httpClient_;
   QLineEdit* usernameInput_;
   QLineEdit* passwordInput_;

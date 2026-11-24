@@ -27,6 +27,8 @@ class HttpClient : public QObject {
   QNetworkReply* getMessageHistory(const QString& conversationId,
                                    const QString& jwt);
 
+  QNetworkReply* publishIdentity(const QString& jwt, const QString& publicKey);
+  QNetworkReply* getPeerKey(const QString& jwt, const QString& conversationId);
   QNetworkReply* listConversations(const QString& jwt);
   const QUrl& baseUrl() const { return baseUrl_; }
 
