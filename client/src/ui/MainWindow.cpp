@@ -127,6 +127,12 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   sendButton_->setEnabled(false);
   messageInput_->setEnabled(false);
 
+  historyTimer_ = new QTimer(this);
+  historyTimer_->setObjectName("historyTimer");
+  historyTimer_->setInterval(3000);
+  historyTimer_->setTimerType(Qt::PreciseTimer);
+  connect(historyTimer_, &QTimer::timeout, this, &MainWindow::requestActiveHistory);
+
   connect(conversationList_, &QListWidget::currentItemChanged, this,
           [this](QListWidgetItem* current, QListWidgetItem*) {
             if (!currentConversationId_.isEmpty()) {
@@ -134,6 +140,9 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
                   messageInput_->text();
             }
 
+            historyTimer_->stop();
+            ++selectionGeneration_;
+            peerKeyPending_ = false;
             currentConversationId_ =
                 current ? current->data(Qt::UserRole).toString() : QString();
 
@@ -146,10 +155,10 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
             sendButton_->setEnabled(false);
             messageInput_->setEnabled(current != nullptr);
 
-            // Show messages allready in memory
+            // Show cached messages for the selected conversation.
             refreshMessages();
 
-            // Get back history from server
+            // Load the peer key before requesting history.
             if (!currentConversationId_.isEmpty() && !accessToken_.isEmpty()) {
               loadPeerKey(currentConversationId_);
             }
@@ -186,117 +195,6 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
 
             // Update the corresponding message
             updateMessageStatus(messageId, status);
-          });
-
-  connect(&messageService_, &network::MessageService::messageHistoryReceived,
-          this,
-          [this](const QString& conversationId, const QByteArray& response,
-                 int httpStatus) {
-            if (!identityKeyPair_ || !conversationKeys_.contains(conversationId)) return;
-            if (httpStatus != 200) {
-              qWarning() << "Failed to load history:" << httpStatus;
-              return;
-            }
-
-            QJsonParseError parseError;
-            const QJsonDocument document =
-                QJsonDocument::fromJson(response, &parseError);
-
-            if (parseError.error != QJsonParseError::NoError ||
-                !document.isObject()) {
-              qWarning() << "Invalid history JSON:" << parseError.errorString();
-              return;
-            }
-
-            const QJsonObject root = document.object();
-
-            if (!root.value("messages").isArray()) {
-              qWarning() << "Missing messages array";
-              return;
-            }
-
-            const QJsonArray messages = root.value("messages").toArray();
-
-            qDebug() << "Conversation:" << conversationId;
-            qDebug() << "Messages received:" << messages.size();
-
-            for (const QJsonValue& value : messages) {
-              if (!value.isObject()) {
-                continue;
-              }
-
-              const QJsonObject message = value.toObject();
-
-              const QString messageId = message.value("message_id").toString();
-
-              const QString senderId = message.value("user_id").toString();
-
-              const QString nonce = message.value("nonce").toString();
-
-              const QString ciphertext = message.value("ciphertext").toString();
-
-              if (messageId.isEmpty()) {
-                continue;
-              }
-
-              // Évite d'écraser un message déjà présent en mémoire
-              if (messages_.contains(messageId) && messages_.value(messageId).text != "[Encrypted message]") {
-                continue;
-              }
-
-              ChatMessage chatMessage;
-
-              chatMessage.id = messageId;
-              chatMessage.text = "[Encrypted message]";
-              chatMessage.status = MessageStatus::Sent;
-
-              chatMessage.senderId = senderId;
-              chatMessage.nonce = nonce;
-              chatMessage.ciphertext = ciphertext;
-
-              chatMessage.serverTimestamp =
-                  message.value("server_timestamp").toString();
-
-              chatMessage.encryptionVersion =
-                  message.value("encryption_version").toInt(1);
-              const auto keys = conversationKeys_.constFind(conversationId);
-              if (chatMessage.encryptionVersion == 2 && keys != conversationKeys_.cend() &&
-                  (senderId == currentUserId_ || senderId == keys->peerId)) {
-                try {
-                  const auto n = QByteArray::fromBase64(nonce.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-                  const auto c = QByteArray::fromBase64(ciphertext.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-                  if (n.size() != crypto_secretbox_NONCEBYTES || c.size() < crypto_secretbox_MACBYTES)
-                    throw std::runtime_error("Invalid encrypted payload");
-                  crypto::EncryptedMessage encrypted;
-                  std::copy(n.begin(), n.end(), encrypted.nonce.begin());
-                  encrypted.ciphertext.assign(c.begin(), c.end());
-                  const auto plain = crypto::MessageCrypto::decrypt(encrypted,
-                      senderId == currentUserId_ ? keys->keys.tx : keys->keys.rx);
-                  chatMessage.text = QString::fromUtf8(plain.data(), plain.size());
-                } catch (const std::exception&) {
-                  chatMessage.text = "[Unable to decrypt]";
-                }
-              }
-
-              messages_.insert(messageId, chatMessage);
-            }
-
-            QStringList& order = conversationMessageOrder_[conversationId];
-
-            // Le serveur renvoie les messages du plus récent au plus ancien.
-            for (int i = messages.size() - 1; i >= 0; --i) {
-              const QJsonObject message = messages.at(i).toObject();
-
-              const QString messageId = message.value("message_id").toString();
-
-              if (messages_.contains(messageId) && !order.contains(messageId)) {
-                order.append(messageId);
-              }
-            }
-
-            if (conversationId == currentConversationId_) {
-              refreshMessages();
-            }
           });
 
   connect(createConversationButton_, &QPushButton::clicked, this,
@@ -350,8 +248,11 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
         if (!conversationList_->currentItem() &&
             conversationList_->count() > 0) {
           conversationList_->setCurrentRow(0);
+        } else if (historyTimer_->isActive()) {
+          requestActiveHistory();
+        } else {
+          loadPeerKey(currentConversationId_);
         }
-        if (!currentConversationId_.isEmpty()) loadPeerKey(currentConversationId_);
         statusBar()->showMessage(
             conversationList_->count() == 0
                 ? "No conversations yet. Create one to begin."
@@ -607,7 +508,10 @@ void MainWindow::refreshAccessToken() {
 }
 
 void MainWindow::resetConversations() {
+  historyTimer_->stop();
   ++sessionGeneration_;
+  ++selectionGeneration_;
+  peerKeyPending_ = false;
   clearCrypto();
   currentUserId_.clear();
   currentConversationId_.clear();
@@ -615,6 +519,7 @@ void MainWindow::resetConversations() {
   messages_.clear();
   conversationMessageOrder_.clear();
   conversationDrafts_.clear();
+  refreshMessages();
   conversationNameInput_->clear();
   conversationParticipantsInput_->clear();
   conversationParticipantsInput_->setEnabled(true);
@@ -750,13 +655,19 @@ void MainWindow::clearCrypto() {
 }
 
 void MainWindow::loadPeerKey(const QString& id) {
-  if (!identityKeyPair_ || accessToken_.isEmpty() || id.isEmpty()) return;
-  if (id == currentConversationId_) sendButton_->setEnabled(false);
-  const auto generation = sessionGeneration_;
+  if (!identityKeyPair_ || accessToken_.isEmpty() || id.isEmpty() ||
+      id != currentConversationId_ || peerKeyPending_) {
+    return;
+  }
+  peerKeyPending_ = true;
+  sendButton_->setEnabled(false);
+  const auto session = sessionGeneration_;
+  const auto selection = selectionGeneration_;
   auto* reply = httpClient_.getPeerKey(accessToken_, id);
-  connect(reply, &QNetworkReply::finished, this, [this, reply, id, generation]() {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, id, session, selection]() {
     reply->deleteLater();
-    if (generation != sessionGeneration_ || !identityKeyPair_) return;
+    if (session != sessionGeneration_ || selection != selectionGeneration_) return;
+    peerKeyPending_ = false;
     try {
       if (reply->error() != QNetworkReply::NoError) throw std::runtime_error("Peer key unavailable");
       const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
@@ -782,16 +693,159 @@ void MainWindow::loadPeerKey(const QString& id) {
       }
       conversationKeys_.insert(id, ConversationKeys{peer, keys});
       sodium_memzero(&keys, sizeof(keys));
-      if (id == currentConversationId_) sendButton_->setEnabled(true);
-      messageService_.getMessageHistory(id, accessToken_);
+      sendButton_->setEnabled(true);
+      historyTimer_->start();
+      requestActiveHistory();
     } catch (const std::exception& e) {
       conversationKeys_.remove(id);
-      if (id == currentConversationId_) {
-        sendButton_->setEnabled(false);
-        statusBar()->showMessage("E2EE unavailable: " + QString::fromUtf8(e.what()));
-      }
+      sendButton_->setEnabled(false);
+      statusBar()->showMessage("E2EE unavailable: " + QString::fromUtf8(e.what()));
     }
   });
+}
+
+void MainWindow::requestActiveHistory() {
+  if (historyPending_ || !historyTimer_->isActive() || accessToken_.isEmpty()) {
+    return;
+  }
+  const auto id = currentConversationId_;
+  const auto session = sessionGeneration_;
+  const auto selection = selectionGeneration_;
+  historyPending_ = true;
+  auto* reply = httpClient_.getMessageHistory(id, accessToken_);
+
+  // Keep the slot occupied until this reply finishes, even after a reset.
+  connect(reply, &QNetworkReply::finished, this,
+          [this, reply, id, session, selection]() {
+    historyPending_ = false;
+    reply->deleteLater();
+    if (session != sessionGeneration_ || selection != selectionGeneration_) {
+      requestActiveHistory();
+      return;
+    }
+
+    const auto status =
+        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 200 && reply->error() != QNetworkReply::NoError) {
+      return;
+    }
+    applyHistory(id, reply->readAll(), status);
+  });
+
+  // Release the polling slot even if the server stops responding.
+  QTimer::singleShot(15000, reply, [reply]() {
+    if (reply->isRunning()) reply->abort();
+  });
+}
+
+void MainWindow::applyHistory(const QString& conversationId,
+                              const QByteArray& response, int httpStatus) {
+  if (httpStatus != 200) {
+    qWarning() << "Failed to load history:" << httpStatus;
+    return;
+  }
+
+  QJsonParseError parseError;
+  const QJsonDocument document =
+      QJsonDocument::fromJson(response, &parseError);
+
+  if (parseError.error != QJsonParseError::NoError ||
+      !document.isObject()) {
+    qWarning() << "Invalid history JSON:" << parseError.errorString();
+    return;
+  }
+
+  const QJsonObject root = document.object();
+
+  if (!root.value("messages").isArray()) {
+    qWarning() << "Missing messages array";
+    return;
+  }
+
+  const QJsonArray messages = root.value("messages").toArray();
+
+  bool changed = false;
+
+  for (const QJsonValue& value : messages) {
+    if (!value.isObject()) {
+      continue;
+    }
+
+    const QJsonObject message = value.toObject();
+
+    const QString messageId = message.value("message_id").toString();
+
+    const QString senderId = message.value("user_id").toString();
+
+    const QString nonce = message.value("nonce").toString();
+
+    const QString ciphertext = message.value("ciphertext").toString();
+
+    if (messageId.isEmpty()) {
+      continue;
+    }
+
+    // Keep previously decoded messages.
+    if (messages_.contains(messageId) && messages_.value(messageId).text != "[Encrypted message]") {
+      continue;
+    }
+
+    ChatMessage chatMessage;
+
+    chatMessage.id = messageId;
+    chatMessage.text = "[Encrypted message]";
+    chatMessage.status = MessageStatus::Sent;
+
+    chatMessage.senderId = senderId;
+    chatMessage.nonce = nonce;
+    chatMessage.ciphertext = ciphertext;
+
+    chatMessage.serverTimestamp =
+        message.value("server_timestamp").toString();
+
+    chatMessage.encryptionVersion =
+        message.value("encryption_version").toInt(1);
+    const auto keys = conversationKeys_.constFind(conversationId);
+    if (chatMessage.encryptionVersion == 2 && keys != conversationKeys_.cend() &&
+        (senderId == currentUserId_ || senderId == keys->peerId)) {
+      try {
+        const auto n = QByteArray::fromBase64(nonce.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+        const auto c = QByteArray::fromBase64(ciphertext.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+        if (n.size() != crypto_secretbox_NONCEBYTES || c.size() < crypto_secretbox_MACBYTES)
+          throw std::runtime_error("Invalid encrypted payload");
+        crypto::EncryptedMessage encrypted;
+        std::copy(n.begin(), n.end(), encrypted.nonce.begin());
+        encrypted.ciphertext.assign(c.begin(), c.end());
+        const auto plain = crypto::MessageCrypto::decrypt(encrypted,
+            senderId == currentUserId_ ? keys->keys.tx : keys->keys.rx);
+        chatMessage.text = QString::fromUtf8(plain.data(), plain.size());
+      } catch (const std::exception&) {
+        chatMessage.text = "[Unable to decrypt]";
+      }
+    }
+
+    const auto existing = messages_.constFind(messageId);
+    changed |= existing == messages_.cend() || existing->text != chatMessage.text;
+    messages_.insert(messageId, chatMessage);
+  }
+
+  QStringList& order = conversationMessageOrder_[conversationId];
+
+  // The server returns newest messages first.
+  for (int i = messages.size() - 1; i >= 0; --i) {
+    const QJsonObject message = messages.at(i).toObject();
+
+    const QString messageId = message.value("message_id").toString();
+
+    if (messages_.contains(messageId) && !order.contains(messageId)) {
+      order.append(messageId);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    refreshMessages();
+  }
 }
 
 void MainWindow::refreshMessages() {

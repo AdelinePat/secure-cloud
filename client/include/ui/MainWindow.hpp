@@ -50,7 +50,14 @@ class MainWindow : public QMainWindow {
   void loadConversations();
   void addConversation(const QString& id, const QString& name, bool select);
   void resetConversations();
+  void requestActiveHistory();
+  void applyHistory(const QString& conversationId, const QByteArray& response,
+                    int httpStatus);
   void refreshMessages();
+  QTimer* historyTimer_;
+  quint64 selectionGeneration_ = 0;
+  bool historyPending_ = false;
+  bool peerKeyPending_ = false;
   void updateMessageStatus(const QString& messageId, MessageStatus status);
   network::MessageService messageService_;
   network::ConversationService conversationService_;
