@@ -15,7 +15,7 @@ def compose(project, *args, **kwargs):
     return subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", project, *args],
         check=kwargs.pop("check", True),
-        text=True,
+        text=kwargs.pop("text", True),
         **kwargs,
     )
 
@@ -61,7 +61,8 @@ def seed_and_login(project, port, name):
     compose(project, "exec", "-T", "backend", "bash", "-c",
             'IFS= read -r AUTH_TEST_PASSWORD; export AUTH_TEST_PASSWORD; '
             'exec /tmp/build-auth/bin/seed_test_user "$1"', "seed", username,
-            input=password + "\n", stdout=subprocess.DEVNULL)
+            text=False, input=(password + "\n").encode("ascii"),
+            stdout=subprocess.DEVNULL)
     session = request(port, "POST", "/auth/login", 200,
                       data={"username": username, "password": password})
     return session["access_token"], session["user_id"]

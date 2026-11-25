@@ -2,7 +2,7 @@
 # Kept outside the service trees so auth/file/messaging share one client.
 
 find_package(OpenSSL REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost CONFIG REQUIRED COMPONENTS system)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(securechat_audit_client STATIC

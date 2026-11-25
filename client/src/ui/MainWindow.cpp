@@ -1,31 +1,33 @@
 #include "ui/MainWindow.hpp"
 
 #include <QDateTime>
-#include <QInputDialog>
-#include <QMessageBox>
-#include <QTextCursor>
-#include <algorithm>
-#include "crypto/IdentityKeyStore.hpp"
-#include "crypto/KeyManager.hpp"
-#include "crypto/PeerTrustStore.hpp"
 #include <QDebug>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <exception>
-#include <stdexcept>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
+#include "crypto/IdentityKeyStore.hpp"
+#include "crypto/KeyManager.hpp"
 #include "crypto/MessageCrypto.hpp"
+#include "crypto/PeerTrustStore.hpp"
 #include "network/dto/SendMessageRequest.hpp"
 #include "ui/MessageStatusMapper.hpp"
 
@@ -38,8 +40,6 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
       httpClient_(httpClient) {
   setWindowTitle("SecureChat");
   resize(900, 600);
-
-
 
   // Create the stacked widget to manage application pages.
   stackedWidget_ = new QStackedWidget(this);
@@ -109,18 +109,45 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
       new QPushButton("Refresh conversations", chatPage_);
 
   reloadConversationsButton_->setObjectName("reloadConversationsButton");
-  localFingerprintLabel_ = new QLabel(chatPage_);
+  auto* securityButton = new QPushButton("Security", chatPage_);
+  securityButton->setObjectName("securityButton");
+  securityDialog_ = new QDialog(this);
+  securityDialog_->setObjectName("securityDialog");
+  securityDialog_->setWindowTitle("Security");
+  securityDialog_->resize(640, 220);
+  connect(securityButton, &QPushButton::clicked, securityDialog_,
+          &QDialog::open);
+
+  localFingerprintLabel_ =
+      new QLabel("Local fingerprint unavailable.", securityDialog_);
   localFingerprintLabel_->setObjectName("localFingerprintLabel");
   localFingerprintLabel_->setTextFormat(Qt::PlainText);
   localFingerprintLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
                                                   Qt::TextSelectableByKeyboard);
   localFingerprintLabel_->setWordWrap(true);
-  peerTrustLabel_ = new QLabel(chatPage_);
+  peerTrustLabel_ = new QLabel("Select a conversation to check peer identity.",
+                               securityDialog_);
   peerTrustLabel_->setObjectName("peerTrustLabel");
   peerTrustLabel_->setTextFormat(Qt::PlainText);
   peerTrustLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse |
-                                          Qt::TextSelectableByKeyboard);
+                                           Qt::TextSelectableByKeyboard);
   peerTrustLabel_->setWordWrap(true);
+
+  auto* closeSecurity =
+      new QDialogButtonBox(QDialogButtonBox::Close, securityDialog_);
+  connect(closeSecurity, &QDialogButtonBox::rejected, securityDialog_,
+          &QDialog::reject);
+  auto* securityLayout = new QVBoxLayout(securityDialog_);
+  securityLayout->addWidget(localFingerprintLabel_);
+  securityLayout->addWidget(peerTrustLabel_);
+  securityLayout->addStretch();
+  securityLayout->addWidget(closeSecurity);
+
+  securityWarningLabel_ = new QLabel(chatPage_);
+  securityWarningLabel_->setObjectName("securityWarningLabel");
+  securityWarningLabel_->setTextFormat(Qt::PlainText);
+  securityWarningLabel_->setWordWrap(true);
+  securityWarningLabel_->hide();
 
   auto* sidebar = new QWidget(chatPage_);
   auto* sidebarLayout = new QVBoxLayout(sidebar);
@@ -129,9 +156,11 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   sidebarLayout->addWidget(reloadConversationsButton_);
   auto* conversationPanel = new QWidget(chatPage_);
   auto* panelLayout = new QVBoxLayout(conversationPanel);
-  panelLayout->addWidget(conversationTitle_);
-  panelLayout->addWidget(localFingerprintLabel_);
-  panelLayout->addWidget(peerTrustLabel_);
+  auto* conversationHeader = new QHBoxLayout();
+  conversationHeader->addWidget(conversationTitle_, 1);
+  conversationHeader->addWidget(securityButton);
+  panelLayout->addLayout(conversationHeader);
+  panelLayout->addWidget(securityWarningLabel_);
   panelLayout->addWidget(messageView_);
   panelLayout->addLayout(inputLayout);
   auto* splitter = new QSplitter(chatPage_);
@@ -148,45 +177,45 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   historyTimer_->setObjectName("historyTimer");
   historyTimer_->setInterval(3000);
   historyTimer_->setTimerType(Qt::PreciseTimer);
-  connect(historyTimer_, &QTimer::timeout, this, &MainWindow::requestActiveHistory);
+  connect(historyTimer_, &QTimer::timeout, this,
+          &MainWindow::requestActiveHistory);
 
-  connect(conversationList_, &QListWidget::currentItemChanged, this,
-          [this](QListWidgetItem* current, QListWidgetItem*) {
-            if (!currentConversationId_.isEmpty()) {
-              conversationDrafts_[currentConversationId_] =
-                  messageInput_->text();
-            }
+  connect(
+      conversationList_, &QListWidget::currentItemChanged, this,
+      [this](QListWidgetItem* current, QListWidgetItem*) {
+        if (!currentConversationId_.isEmpty()) {
+          conversationDrafts_[currentConversationId_] = messageInput_->text();
+        }
 
-            historyTimer_->stop();
-            ++selectionGeneration_;
-            peerKeyPending_ = false;
-            currentConversationId_ =
-                current ? current->data(Qt::UserRole).toString() : QString();
+        historyTimer_->stop();
+        ++selectionGeneration_;
+        peerKeyPending_ = false;
+        currentConversationId_ =
+            current ? current->data(Qt::UserRole).toString() : QString();
 
-            conversationTitle_->setText(current ? current->text()
-                                                : "Select a conversation");
+        conversationTitle_->setText(current ? current->text()
+                                            : "Select a conversation");
 
-            messageInput_->setText(
-                conversationDrafts_.value(currentConversationId_));
+        messageInput_->setText(
+            conversationDrafts_.value(currentConversationId_));
 
-            sendButton_->setEnabled(false);
-            messageInput_->setEnabled(current != nullptr);
+        sendButton_->setEnabled(false);
+        messageInput_->setEnabled(current != nullptr);
 
-            peerTrustLabel_->setText(peerTrustDetails_.value(currentConversationId_));
+        showPeerTrustDetails(peerTrustDetails_.value(currentConversationId_));
 
-            // Show cached messages for the selected conversation.
-            refreshMessages();
+        // Show cached messages for the selected conversation.
+        refreshMessages();
 
-            // Load the peer key before requesting history.
-            if (!currentConversationId_.isEmpty() && !accessToken_.isEmpty()) {
-              loadPeerKey(currentConversationId_);
-            }
-          });
-  connect(reloadConversationsButton_, &QPushButton::clicked, this,
-          [this] {
-            loadPeerKey(currentConversationId_, true);
-            loadConversations();
-          });
+        // Load the peer key before requesting history.
+        if (!currentConversationId_.isEmpty() && !accessToken_.isEmpty()) {
+          loadPeerKey(currentConversationId_);
+        }
+      });
+  connect(reloadConversationsButton_, &QPushButton::clicked, this, [this] {
+    loadPeerKey(currentConversationId_, true);
+    loadConversations();
+  });
 
   // Register both pages.
   stackedWidget_->addWidget(loginPage_);
@@ -314,129 +343,145 @@ void MainWindow::onLoginClicked() {
 
   QNetworkReply* reply = httpClient_.login(username, password);
 
-  connect(reply, &QNetworkReply::finished, this, [this, reply, username, password]() {
-    loginButton_->setEnabled(true);
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [this, reply, username, password]() {
+        loginButton_->setEnabled(true);
 
-    const int status =
-        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
-    if (reply->error() != QNetworkReply::NoError || status != 200) {
-      qWarning() << "Login failed:" << status << reply->errorString();
-      reply->deleteLater();
-      stackedWidget_->setCurrentWidget(loginPage_);
-      resize(400, 250);
-      return;
-    }
+        if (reply->error() != QNetworkReply::NoError || status != 200) {
+          qWarning() << "Login failed:" << status << reply->errorString();
+          reply->deleteLater();
+          stackedWidget_->setCurrentWidget(loginPage_);
+          resize(400, 250);
+          return;
+        }
 
-    const QByteArray response = reply->readAll();
+        const QByteArray response = reply->readAll();
 
-    QJsonParseError parseError;
-    QJsonDocument document = QJsonDocument::fromJson(response, &parseError);
+        QJsonParseError parseError;
+        QJsonDocument document = QJsonDocument::fromJson(response, &parseError);
 
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-      qWarning() << "Invalid login response";
-      reply->deleteLater();
-      return;
-    }
+        if (parseError.error != QJsonParseError::NoError ||
+            !document.isObject()) {
+          qWarning() << "Invalid login response";
+          reply->deleteLater();
+          return;
+        }
 
-    const QJsonObject json = document.object();
+        const QJsonObject json = document.object();
 
-    const QString userId = json.value("user_id").toString();
-    const QString accessToken = json.value("access_token").toString();
-    const QString refreshToken = json.value("refresh_token").toString();
+        const QString userId = json.value("user_id").toString();
+        const QString accessToken = json.value("access_token").toString();
+        const QString refreshToken = json.value("refresh_token").toString();
 
-    if (QUuid(userId).isNull() || accessToken.isEmpty() ||
-        refreshToken.isEmpty()) {
-      qWarning() << "Missing authentication tokens";
-      reply->deleteLater();
-      return;
-    }
+        if (QUuid(userId).isNull() || accessToken.isEmpty() ||
+            refreshToken.isEmpty()) {
+          qWarning() << "Missing authentication tokens";
+          reply->deleteLater();
+          return;
+        }
 
-    reply->deleteLater();
-    resetConversations();
-    loginButton_->setEnabled(false);
-    currentUserId_ = QUuid(userId).toString(QUuid::WithoutBraces);
-    accessToken_ = accessToken;
-    refreshToken_ = refreshToken;
+        reply->deleteLater();
+        resetConversations();
+        loginButton_->setEnabled(false);
+        currentUserId_ = QUuid(userId).toString(QUuid::WithoutBraces);
+        accessToken_ = accessToken;
+        refreshToken_ = refreshToken;
 
-    try {
-      // Legacy separate identity passphrase flow (disabled).
-      /*
-      const bool exists = crypto::IdentityKeyStore::exists(userId);
-      bool accepted = false;
-      const auto passphrase = QInputDialog::getText(this, "SecureChat - Identity",
-          exists ? "Enter your identity passphrase:" : "Choose your identity passphrase:",
-          QLineEdit::Password, QString(), &accepted);
-      if (!accepted || passphrase.isEmpty()) throw std::runtime_error("Identity cancelled");
-      if (exists) {
-        identityKeyPair_ = crypto::IdentityKeyStore::load(userId, passphrase);
-      } else {
-        const auto confirmation = QInputDialog::getText(this, "Confirm passphrase",
-            "Confirm your passphrase:", QLineEdit::Password, QString(), &accepted);
-        if (!accepted || confirmation != passphrase) throw std::runtime_error("Passphrase mismatch");
-        auto pair = crypto::KeyManager::generateKeyPair();
-        crypto::IdentityKeyStore::save(userId, pair, passphrase);
-        identityKeyPair_ = pair;
-        sodium_memzero(pair.privateKey.data(), pair.privateKey.size());
-      }
-      */
-      // Use the login password to protect the local identity key.
-      if (crypto::IdentityKeyStore::exists(userId)) {
-        // Legacy passphrase migration disabled; retain for future reference.
-        // try {
-        // identityKeyPair_ = crypto::IdentityKeyStore::load(userId, password);
-        // } catch (const std::exception&) {
-        // // One-time migration of an existing identity; never replace its key pair.
-        // bool accepted = false;
-        // const auto legacyPassphrase = QInputDialog::getText(
-        // this, "Migrate identity", "Enter your previous identity passphrase:",
-        // QLineEdit::Password, QString(), &accepted);
-        // if (!accepted || legacyPassphrase.isEmpty())
-        // throw std::runtime_error("Identity migration cancelled");
-        // identityKeyPair_ = crypto::IdentityKeyStore::load(userId, legacyPassphrase);
-        // crypto::IdentityKeyStore::save(userId, *identityKeyPair_, password);
-        // }
-        identityKeyPair_ = crypto::IdentityKeyStore::load(userId, password);
-      } else {
-        identityKeyPair_ = crypto::KeyManager::generateKeyPair();
-        crypto::IdentityKeyStore::save(userId, *identityKeyPair_, password);
-      }
-    } catch (const std::exception& e) {
-      qWarning() << "Identity initialization failed:" << e.what();
-      resetConversations(); accessToken_.clear(); refreshToken_.clear();
-      loginButton_->setEnabled(true);
-      QMessageBox::warning(this, "Identity error", "Unable to initialize identity. Check your login password and local identity file.");
-      return;
-    }
-    const auto& pk = identityKeyPair_->publicKey;
-    localFingerprintLabel_->setText("Your SHA-256 fingerprint: " +
-                                    crypto::PeerTrustStore::fingerprint(pk));
-    const QString encoded = QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(pk.data()), pk.size()).toBase64());
-    auto* publication = httpClient_.publishIdentity(accessToken_, encoded);
-    connect(publication, &QNetworkReply::finished, this, [this, publication, username]() {
-      publication->deleteLater();
-      loginButton_->setEnabled(true);
-      if (publication->error() != QNetworkReply::NoError ||
-          publication->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) {
-        resetConversations(); accessToken_.clear(); refreshToken_.clear();
-        QMessageBox::warning(this, "Identity error", "Public key publication failed. Check server and existing key.");
-        return;
-      }
-      refreshTimer_->start();
+        try {
+          // Legacy separate identity passphrase flow (disabled).
+          /*
+          const bool exists = crypto::IdentityKeyStore::exists(userId);
+          bool accepted = false;
+          const auto passphrase = QInputDialog::getText(this, "SecureChat -
+          Identity", exists ? "Enter your identity passphrase:" : "Choose your
+          identity passphrase:", QLineEdit::Password, QString(), &accepted); if
+          (!accepted || passphrase.isEmpty()) throw std::runtime_error("Identity
+          cancelled"); if (exists) { identityKeyPair_ =
+          crypto::IdentityKeyStore::load(userId, passphrase); } else { const
+          auto confirmation = QInputDialog::getText(this, "Confirm passphrase",
+                "Confirm your passphrase:", QLineEdit::Password, QString(),
+          &accepted); if (!accepted || confirmation != passphrase) throw
+          std::runtime_error("Passphrase mismatch"); auto pair =
+          crypto::KeyManager::generateKeyPair();
+            crypto::IdentityKeyStore::save(userId, pair, passphrase);
+            identityKeyPair_ = pair;
+            sodium_memzero(pair.privateKey.data(), pair.privateKey.size());
+          }
+          */
+          // Use the login password to protect the local identity key.
+          if (crypto::IdentityKeyStore::exists(userId)) {
+            // Legacy passphrase migration disabled; retain for future
+            // reference. try { identityKeyPair_ =
+            // crypto::IdentityKeyStore::load(userId, password); } catch (const
+            // std::exception&) {
+            // // One-time migration of an existing identity; never replace its
+            // key pair. bool accepted = false; const auto legacyPassphrase =
+            // QInputDialog::getText( this, "Migrate identity", "Enter your
+            // previous identity passphrase:", QLineEdit::Password, QString(),
+            // &accepted); if (!accepted || legacyPassphrase.isEmpty()) throw
+            // std::runtime_error("Identity migration cancelled");
+            // identityKeyPair_ = crypto::IdentityKeyStore::load(userId,
+            // legacyPassphrase); crypto::IdentityKeyStore::save(userId,
+            // *identityKeyPair_, password);
+            // }
+            identityKeyPair_ = crypto::IdentityKeyStore::load(userId, password);
+          } else {
+            identityKeyPair_ = crypto::KeyManager::generateKeyPair();
+            crypto::IdentityKeyStore::save(userId, *identityKeyPair_, password);
+          }
+        } catch (const std::exception& e) {
+          qWarning() << "Identity initialization failed:" << e.what();
+          resetConversations();
+          accessToken_.clear();
+          refreshToken_.clear();
+          loginButton_->setEnabled(true);
+          QMessageBox::warning(this, "Identity error",
+                               "Unable to initialize identity. Check your "
+                               "login password and local identity file.");
+          return;
+        }
+        const auto& pk = identityKeyPair_->publicKey;
+        localFingerprintLabel_->setText(
+            "Local SHA-256 fingerprint: " +
+            crypto::PeerTrustStore::fingerprint(pk));
+        const QString encoded = QString::fromLatin1(
+            QByteArray(reinterpret_cast<const char*>(pk.data()), pk.size())
+                .toBase64());
+        auto* publication = httpClient_.publishIdentity(accessToken_, encoded);
+        connect(
+            publication, &QNetworkReply::finished, this,
+            [this, publication, username]() {
+              publication->deleteLater();
+              loginButton_->setEnabled(true);
+              if (publication->error() != QNetworkReply::NoError ||
+                  publication
+                          ->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                          .toInt() != 200) {
+                resetConversations();
+                accessToken_.clear();
+                refreshToken_.clear();
+                QMessageBox::warning(this, "Identity error",
+                                     "Public key publication failed. Check "
+                                     "server and existing key.");
+                return;
+              }
+              refreshTimer_->start();
 
-    // Switch to the chat page after successful authentication.
-    stackedWidget_->setCurrentWidget(chatPage_);
-    resize(900, 600);
+              // Switch to the chat page after successful authentication.
+              stackedWidget_->setCurrentWidget(chatPage_);
+              resize(900, 600);
 
-    // Update the interface after successful authentication.
-    setWindowTitle("SecureChat - Connected as " + username);
+              // Update the interface after successful authentication.
+              setWindowTitle("SecureChat - Connected as " + username);
 
-    passwordInput_->clear();
-    loadConversations();
-
-    qDebug() << "Login successful for:" << username;
-    });
-  });
+              passwordInput_->clear();
+              loadConversations();
+            });
+      });
 }
 
 void MainWindow::refreshAccessToken() {
@@ -536,8 +581,9 @@ void MainWindow::resetConversations() {
   currentUserId_.clear();
   currentConversationId_.clear();
   peerTrustDetails_.clear();
-  localFingerprintLabel_->clear();
-  peerTrustLabel_->clear();
+  localFingerprintLabel_->setText("Local fingerprint unavailable.");
+  showPeerTrustDetails({});
+  securityDialog_->close();
   conversationList_->clear();
   messages_.clear();
   conversationMessageOrder_.clear();
@@ -624,7 +670,8 @@ void MainWindow::onSendClicked() {
   QString message = messageInput_->text().trimmed();
 
   if (message.isEmpty() || currentConversationId_.isEmpty() ||
-      accessToken_.isEmpty() || !sendButton_->isEnabled() || !conversationKeys_.contains(currentConversationId_)) {
+      accessToken_.isEmpty() || !sendButton_->isEnabled() ||
+      !conversationKeys_.contains(currentConversationId_)) {
     return;
   }
 
@@ -646,8 +693,9 @@ void MainWindow::onSendClicked() {
 
   try {
     // Encrypt the message before sending it to the network layer
-    crypto::EncryptedMessage encryptedMessage =
-        crypto::MessageCrypto::encrypt(message.toUtf8().toStdString(), conversationKeys_.value(currentConversationId_).keys.tx);
+    crypto::EncryptedMessage encryptedMessage = crypto::MessageCrypto::encrypt(
+        message.toUtf8().toStdString(),
+        conversationKeys_.value(currentConversationId_).keys.tx);
 
     // Build the encrypted message request
     network::dto::SendMessageRequest request;
@@ -671,9 +719,12 @@ void MainWindow::onSendClicked() {
 }
 
 void MainWindow::clearCrypto() {
-  if (identityKeyPair_) sodium_memzero(identityKeyPair_->privateKey.data(), identityKeyPair_->privateKey.size());
+  if (identityKeyPair_)
+    sodium_memzero(identityKeyPair_->privateKey.data(),
+                   identityKeyPair_->privateKey.size());
   identityKeyPair_.reset();
-  for (auto& entry : conversationKeys_) sodium_memzero(&entry.keys, sizeof(entry.keys));
+  for (auto& entry : conversationKeys_)
+    sodium_memzero(&entry.keys, sizeof(entry.keys));
   conversationKeys_.clear();
 }
 
@@ -683,6 +734,17 @@ void MainWindow::clearConversationKeys(const QString& id) {
     sodium_memzero(&entry->keys, sizeof(entry->keys));
     conversationKeys_.erase(entry);
   }
+}
+
+void MainWindow::showPeerTrustDetails(const QString& details) {
+  peerTrustLabel_->setText(
+      details.isEmpty()
+          ? QString("Select a conversation to check peer identity.")
+          : details);
+  const bool warning = details.startsWith("E2EE ");
+  securityWarningLabel_->setText(warning ? details.section('\n', 0, 0)
+                                         : QString());
+  securityWarningLabel_->setVisible(warning);
 }
 
 void MainWindow::loadPeerKey(const QString& id, bool revalidate) {
@@ -697,72 +759,88 @@ void MainWindow::loadPeerKey(const QString& id, bool revalidate) {
   peerKeyPending_ = true;
   sendButton_->setEnabled(false);
   if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
-    peerTrustLabel_->setText("Checking peer identity...");
+    showPeerTrustDetails("Checking peer identity...");
   }
   const auto session = sessionGeneration_;
   const auto selection = selectionGeneration_;
   auto* reply = httpClient_.getPeerKey(accessToken_, id);
-  connect(reply, &QNetworkReply::finished, this, [this, reply, id, session, selection]() {
-    reply->deleteLater();
-    if (session != sessionGeneration_ || selection != selectionGeneration_) return;
-    peerKeyPending_ = false;
-    try {
-      if (reply->error() != QNetworkReply::NoError) throw std::runtime_error("Peer key unavailable");
-      const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
-      const QUuid peerUuid(obj.value("user_id").toString());
-      const auto peer = peerUuid.toString(QUuid::WithoutBraces);
-      const auto bytes = QByteArray::fromBase64(obj.value("public_key").toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-      if (peerUuid.isNull() || peer == currentUserId_ || bytes.size() != crypto_kx_PUBLICKEYBYTES)
-        throw std::runtime_error("Invalid peer key");
-      crypto::PublicKey pk;
-      std::copy(bytes.begin(), bytes.end(), pk.begin());
-      const auto trust = crypto::PeerTrustStore::checkOrPin(
-          currentUserId_, id, peer, pk);
-      using TrustStatus = crypto::PeerTrustStore::Status;
-      if (trust.status != TrustStatus::Trusted) {
-        const QString reason = trust.status == TrustStatus::PeerMismatch
-            ? "conversation peer changed" : "peer key changed";
-        const auto warning = QString(
-            "E2EE blocked: %1. Verify the peer through a separate channel.\n"
-            "Expected: %2\nSHA-256: %3\nPresented: %4\nSHA-256: %5")
-            .arg(reason, trust.expectedPeer, trust.expectedFingerprint,
-                 peer, trust.presentedFingerprint);
-        peerTrustDetails_.insert(id, warning);
-        peerTrustLabel_->setText(warning);
-        return;
-      }
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [this, reply, id, session, selection]() {
+        reply->deleteLater();
+        if (session != sessionGeneration_ || selection != selectionGeneration_)
+          return;
+        peerKeyPending_ = false;
+        try {
+          if (reply->error() != QNetworkReply::NoError)
+            throw std::runtime_error("Peer key unavailable");
+          const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+          const QUuid peerUuid(obj.value("user_id").toString());
+          const auto peer = peerUuid.toString(QUuid::WithoutBraces);
+          const auto bytes = QByteArray::fromBase64(
+              obj.value("public_key").toString().toLatin1(),
+              QByteArray::AbortOnBase64DecodingErrors);
+          if (peerUuid.isNull() || peer == currentUserId_ ||
+              bytes.size() != crypto_kx_PUBLICKEYBYTES)
+            throw std::runtime_error("Invalid peer key");
+          crypto::PublicKey pk;
+          std::copy(bytes.begin(), bytes.end(), pk.begin());
+          const auto trust =
+              crypto::PeerTrustStore::checkOrPin(currentUserId_, id, peer, pk);
+          using TrustStatus = crypto::PeerTrustStore::Status;
+          if (trust.status != TrustStatus::Trusted) {
+            const QString reason = trust.status == TrustStatus::PeerMismatch
+                                       ? "conversation peer changed"
+                                       : "peer key changed";
+            const auto warning =
+                QString(
+                    "E2EE blocked: %1. Verify the peer through a separate "
+                    "channel.\n"
+                    "Expected: %2\nSHA-256: %3\nPresented: %4\nSHA-256: %5")
+                    .arg(reason, trust.expectedPeer, trust.expectedFingerprint,
+                         peer, trust.presentedFingerprint);
+            peerTrustDetails_.insert(id, warning);
+            showPeerTrustDetails(warning);
+            return;
+          }
 
-      const auto& own = *identityKeyPair_;
-      // Stable role ordering gives matching transmit and receive keys.
-      auto keys = currentUserId_ < peer ?
-          crypto::KeyManager::deriveClientSessionKeys(own.publicKey, own.privateKey, pk) :
-          crypto::KeyManager::deriveServerSessionKeys(own.publicKey, own.privateKey, pk);
-      // Bind keys to the conversation to avoid cross-conversation reuse.
-      const auto context = id.toUtf8();
-      for (auto* key : {&keys.rx, &keys.tx}) {
-        crypto::SessionKey derived{};
-        crypto_generichash(derived.data(), derived.size(), reinterpret_cast<const unsigned char*>(context.constData()), context.size(), key->data(), key->size());
-        sodium_memzero(key->data(), key->size());
-        *key = derived;
-        sodium_memzero(derived.data(), derived.size());
-      }
-      conversationKeys_.insert(id, ConversationKeys{peer, keys});
-      sodium_memzero(&keys, sizeof(keys));
-      const auto details = QString("Peer: %1\nSHA-256: %2")
-          .arg(peer, trust.expectedFingerprint);
-      peerTrustDetails_.insert(id, details);
-      peerTrustLabel_->setText(details);
-      sendButton_->setEnabled(true);
-      historyTimer_->start();
-      requestActiveHistory();
-    } catch (const std::exception& e) {
-      if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
-        const auto warning = "E2EE unavailable: " + QString::fromUtf8(e.what());
-        peerTrustDetails_.insert(id, warning);
-        peerTrustLabel_->setText(warning);
-      }
-    }
-  });
+          const auto& own = *identityKeyPair_;
+          // Stable role ordering gives matching transmit and receive keys.
+          auto keys = currentUserId_ < peer
+                          ? crypto::KeyManager::deriveClientSessionKeys(
+                                own.publicKey, own.privateKey, pk)
+                          : crypto::KeyManager::deriveServerSessionKeys(
+                                own.publicKey, own.privateKey, pk);
+          // Bind keys to the conversation to avoid cross-conversation reuse.
+          const auto context = id.toUtf8();
+          for (auto* key : {&keys.rx, &keys.tx}) {
+            crypto::SessionKey derived{};
+            crypto_generichash(
+                derived.data(), derived.size(),
+                reinterpret_cast<const unsigned char*>(context.constData()),
+                context.size(), key->data(), key->size());
+            sodium_memzero(key->data(), key->size());
+            *key = derived;
+            sodium_memzero(derived.data(), derived.size());
+          }
+          conversationKeys_.insert(id, ConversationKeys{peer, keys});
+          sodium_memzero(&keys, sizeof(keys));
+          const auto details = QString("Peer UUID: %1\nSHA-256: %2")
+                                   .arg(peer, trust.expectedFingerprint);
+          peerTrustDetails_.insert(id, details);
+          showPeerTrustDetails(details);
+          sendButton_->setEnabled(true);
+          historyTimer_->start();
+          requestActiveHistory();
+        } catch (const std::exception& e) {
+          if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
+            const auto warning =
+                "E2EE unavailable: " + QString::fromUtf8(e.what());
+            peerTrustDetails_.insert(id, warning);
+            showPeerTrustDetails(warning);
+          }
+        }
+      });
   QTimer::singleShot(15000, reply, [reply] {
     if (reply->isRunning()) reply->abort();
   });
@@ -779,22 +857,24 @@ void MainWindow::requestActiveHistory() {
   auto* reply = httpClient_.getMessageHistory(id, accessToken_);
 
   // Keep the slot occupied until this reply finishes, even after a reset.
-  connect(reply, &QNetworkReply::finished, this,
-          [this, reply, id, session, selection]() {
-    historyPending_ = false;
-    reply->deleteLater();
-    if (session != sessionGeneration_ || selection != selectionGeneration_) {
-      requestActiveHistory();
-      return;
-    }
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [this, reply, id, session, selection]() {
+        historyPending_ = false;
+        reply->deleteLater();
+        if (session != sessionGeneration_ ||
+            selection != selectionGeneration_) {
+          requestActiveHistory();
+          return;
+        }
 
-    const auto status =
-        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status == 200 && reply->error() != QNetworkReply::NoError) {
-      return;
-    }
-    applyHistory(id, reply->readAll(), status);
-  });
+        const auto status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200 && reply->error() != QNetworkReply::NoError) {
+          return;
+        }
+        applyHistory(id, reply->readAll(), status);
+      });
 
   // Release the polling slot even if the server stops responding.
   QTimer::singleShot(15000, reply, [reply]() {
@@ -810,11 +890,9 @@ void MainWindow::applyHistory(const QString& conversationId,
   }
 
   QJsonParseError parseError;
-  const QJsonDocument document =
-      QJsonDocument::fromJson(response, &parseError);
+  const QJsonDocument document = QJsonDocument::fromJson(response, &parseError);
 
-  if (parseError.error != QJsonParseError::NoError ||
-      !document.isObject()) {
+  if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
     qWarning() << "Invalid history JSON:" << parseError.errorString();
     return;
   }
@@ -850,7 +928,8 @@ void MainWindow::applyHistory(const QString& conversationId,
     }
 
     // Keep previously decoded messages.
-    if (messages_.contains(messageId) && messages_.value(messageId).text != "[Encrypted message]") {
+    if (messages_.contains(messageId) &&
+        messages_.value(messageId).text != "[Encrypted message]") {
       continue;
     }
 
@@ -864,23 +943,27 @@ void MainWindow::applyHistory(const QString& conversationId,
     chatMessage.nonce = nonce;
     chatMessage.ciphertext = ciphertext;
 
-    chatMessage.serverTimestamp =
-        message.value("server_timestamp").toString();
+    chatMessage.serverTimestamp = message.value("server_timestamp").toString();
 
     chatMessage.encryptionVersion =
         message.value("encryption_version").toInt(1);
     const auto keys = conversationKeys_.constFind(conversationId);
-    if (chatMessage.encryptionVersion == 2 && keys != conversationKeys_.cend() &&
+    if (chatMessage.encryptionVersion == 2 &&
+        keys != conversationKeys_.cend() &&
         (senderId == currentUserId_ || senderId == keys->peerId)) {
       try {
-        const auto n = QByteArray::fromBase64(nonce.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-        const auto c = QByteArray::fromBase64(ciphertext.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-        if (n.size() != crypto_secretbox_NONCEBYTES || c.size() < crypto_secretbox_MACBYTES)
+        const auto n = QByteArray::fromBase64(
+            nonce.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+        const auto c = QByteArray::fromBase64(
+            ciphertext.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+        if (n.size() != crypto_secretbox_NONCEBYTES ||
+            c.size() < crypto_secretbox_MACBYTES)
           throw std::runtime_error("Invalid encrypted payload");
         crypto::EncryptedMessage encrypted;
         std::copy(n.begin(), n.end(), encrypted.nonce.begin());
         encrypted.ciphertext.assign(c.begin(), c.end());
-        const auto plain = crypto::MessageCrypto::decrypt(encrypted,
+        const auto plain = crypto::MessageCrypto::decrypt(
+            encrypted,
             senderId == currentUserId_ ? keys->keys.tx : keys->keys.rx);
         chatMessage.text = QString::fromUtf8(plain.data(), plain.size());
       } catch (const std::exception&) {
@@ -889,7 +972,8 @@ void MainWindow::applyHistory(const QString& conversationId,
     }
 
     const auto existing = messages_.constFind(messageId);
-    changed |= existing == messages_.cend() || existing->text != chatMessage.text;
+    changed |=
+        existing == messages_.cend() || existing->text != chatMessage.text;
     messages_.insert(messageId, chatMessage);
   }
 
@@ -938,8 +1022,9 @@ void MainWindow::refreshMessages() {
     // Render untrusted plaintext as text, never as HTML.
     auto cursor = messageView_->textCursor();
     cursor.movePosition(QTextCursor::End);
-    cursor.insertText((message.senderId == currentUserId_ ? "You: " : "Peer: ") +
-                      message.text + " [" + statusText + "]\n");
+    cursor.insertText(
+        (message.senderId == currentUserId_ ? "You: " : "Peer: ") +
+        message.text + " [" + statusText + "]\n");
   }
 }
 

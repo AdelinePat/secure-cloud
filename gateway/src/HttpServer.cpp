@@ -111,24 +111,19 @@ std::uint16_t HttpServer::localPort() const {
 void HttpServer::acceptConnection() {
   using boost::asio::ip::tcp;
 
-  std::cerr << "[SERVER] Waiting for connection..." << '\n';
-
   acceptor_.async_accept(
       [this](const boost::system::error_code& ec, tcp::socket socket) {
         if (!ec) {
           ++acceptedConnections_;
-
-          std::cerr << "[SERVER] Connection accepted: " << acceptedConnections_
-                    << '\n';
 
           std::make_shared<HttpSession>(std::move(socket), router_)->start();
         } else {
           std::cerr << "[SERVER] Accept error: " << ec.message() << '\n';
         }
 
-        if (acceptor_.is_open()) {
-          acceptConnection();
-        }
+          if (acceptor_.is_open()) {
+            acceptConnection();
+          }
       });
 }
 
