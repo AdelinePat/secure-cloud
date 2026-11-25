@@ -55,10 +55,22 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
     auto self = shared_from_this();
 
     // Read an incoming HTTP request
-    http::async_read(stream_, buffer_, request_,
+    parser_.body_limit(2 * 1024 * 1024);
+    http::async_read(stream_, buffer_, parser_,
                      [self](beast::error_code ec, std::size_t) {
-                       if (ec) {
+                       if (ec == http::error::body_limit) {
+                         const unsigned version = self->parser_.is_header_done()
+                             ? self->parser_.get().version() : 11;
+                         self->response_ = http::response<http::string_body>{
+                             http::status::payload_too_large, version};
+                         self->response_.set(http::field::content_type,
+                                             "application/json");
+                         self->response_.body() = R"({"error":"MESSAGE_TOO_LARGE"})";
+                         self->response_.prepare_payload();
+                       } else if (ec) {
                          return;
+                       } else {
+                         self->response_ = self->router_.route(self->parser_.get());
                        }
 
                        self->sendResponse();
@@ -67,7 +79,6 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
 
   void sendResponse() {
     // Keep the response alive until the asynchronous write completes
-    response_ = router_.route(request_);
     response_.keep_alive(false);
 
     auto self = shared_from_this();
@@ -87,7 +98,7 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
   beast::tcp_stream stream_;
   beast::flat_buffer buffer_;
 
-  http::request<http::string_body> request_;
+  http::request_parser<http::string_body> parser_;
   http::response<http::string_body> response_;
   HttpRouter& router_;
 };
@@ -100,24 +111,19 @@ std::uint16_t HttpServer::localPort() const {
 void HttpServer::acceptConnection() {
   using boost::asio::ip::tcp;
 
-  std::cerr << "[SERVER] Waiting for connection..." << '\n';
-
   acceptor_.async_accept(
       [this](const boost::system::error_code& ec, tcp::socket socket) {
         if (!ec) {
           ++acceptedConnections_;
-
-          std::cerr << "[SERVER] Connection accepted: " << acceptedConnections_
-                    << '\n';
 
           std::make_shared<HttpSession>(std::move(socket), router_)->start();
         } else {
           std::cerr << "[SERVER] Accept error: " << ec.message() << '\n';
         }
 
-        if (acceptor_.is_open()) {
-          acceptConnection();
-        }
+          if (acceptor_.is_open()) {
+            acceptConnection();
+          }
       });
 }
 

@@ -24,8 +24,8 @@ class HttpRouterTests : public ::testing::Test {
   auth::repositories::test::InMemorySessionRepository sessionRepository;
 
   auth::crypto::JwtKeyManager jwtKeyManager{
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem"};
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem"};
 
   auth::services::AuthService authService{userRepository, sessionRepository,
                                           jwtKeyManager};
@@ -111,7 +111,7 @@ TEST_F(HttpRouterTests, LoginSuccessReturnsTokens) {
   // Seed a test user with an Argon2id password hash.
   auth::domain::User user{};
 
-  user.id = "test-user-123";
+  user.id = "01234567-89ab-4def-8123-456789abcdef";
   user.username = "alice";
   user.email = "alice@example.com";
   user.password_hash = auth::crypto::PasswordHasher::hash("CorrectPassword123");
@@ -142,7 +142,7 @@ TEST_F(HttpRouterTests, LoginSuccessReturnsTokens) {
 TEST_F(HttpRouterTests, LoginWrongPasswordReturns401) {
   auth::domain::User user{};
 
-  user.id = "test-user-123";
+  user.id = "01234567-89ab-4def-8123-456789abcdef";
   user.username = "alice";
   user.email = "alice@example.com";
   user.password_hash = auth::crypto::PasswordHasher::hash("CorrectPassword123");

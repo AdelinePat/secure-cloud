@@ -5,18 +5,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <pqxx/except>
 #include <pqxx/pqxx>
-#include <regex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
 #include "common/audit/AuditClient.hpp"
+#include "common/security/TokenFormat.hpp"
 #include "messaging/repositories/PostgresConversationRepository.hpp"
 #include "messaging/repositories/PostgresMessageRepository.hpp"
 #include "messaging/security/JwtVerifier.hpp"
@@ -60,6 +60,28 @@ std::string encodeBase64(const std::vector<unsigned char>& data) {
 }
 
 using tcp = asio::ip::tcp;
+
+namespace {
+
+constexpr std::size_t maxRequestBodySize = 2 * 1024 * 1024;
+constexpr std::string_view conversationPrefix = "/conversations/";
+
+std::optional<std::string> conversationRouteId(std::string_view target,
+                                               std::string_view suffix) {
+  if (!target.starts_with(conversationPrefix) || !target.ends_with(suffix) ||
+      target.size() < conversationPrefix.size() + suffix.size()) {
+    return std::nullopt;
+  }
+  const auto id = target.substr(
+      conversationPrefix.size(),
+      target.size() - conversationPrefix.size() - suffix.size());
+  if (id.find('/') != std::string_view::npos) {
+    return std::nullopt;
+  }
+  return std::string(id);
+}
+
+}  // namespace
 
 int main() {
   try {
@@ -129,10 +151,29 @@ int main() {
       acceptor.accept(socket);
 
       beast::flat_buffer buffer;
-      http::request<http::string_body> request;
-
-      // Read the incoming HTTP request.
-      http::read(socket, buffer, request);
+      http::request_parser<http::string_body> parser;
+      parser.body_limit(maxRequestBodySize);
+      beast::error_code error;
+      http::read(socket, buffer, parser, error);
+      if (error) {
+        if (error == http::error::body_limit) {
+          const unsigned version = parser.is_header_done()
+              ? parser.get().version() : 11;
+          http::response<http::string_body> tooLarge{
+              http::status::payload_too_large, version};
+          tooLarge.set(http::field::content_type, "application/json");
+          tooLarge.keep_alive(false);
+          tooLarge.body() = R"({"error":"MESSAGE_TOO_LARGE"})";
+          tooLarge.prepare_payload();
+          http::write(socket, tooLarge, error);
+        }
+        continue;
+      }
+      const auto request = parser.release();
+      const std::string_view target(request.target().data(),
+                                    request.target().size());
+      const auto peerId = conversationRouteId(target, "/peer-key");
+      const auto messageConversationId = conversationRouteId(target, "/messages");
 
       http::response<http::string_body> response;
 
@@ -149,8 +190,7 @@ int main() {
       } else if ((request.method() == http::verb::put &&
                   request.target() == "/identity-key") ||
                  (request.method() == http::verb::get &&
-                  std::regex_match(std::string(request.target()),
-                    std::regex(R"(^/conversations/[0-9a-fA-F-]{36}/peer-key$)")))) {
+                  peerId)) {
         const std::string authorization(request[http::field::authorization]);
         const auto subject = authorization.starts_with("Bearer ")
             ? jwtVerifier.verify(authorization.substr(7)) : std::nullopt;
@@ -179,8 +219,11 @@ int main() {
               response.result(stored ? http::status::ok : http::status::conflict);
               response.body() = stored ? R"({"status":"ok"})" : R"({"error":"KEY_CONFLICT"})";
             }
+          } else if (!common::security::isUuid(*peerId)) {
+            response.result(http::status::bad_request);
+            response.body() = R"({"error":"INVALID_CONVERSATION_ID"})";
           } else {
-            const auto id = std::string(request.target()).substr(15, 36);
+            const auto& id = *peerId;
             const auto conversation = conversationRepository.findById(id);
             if (!conversation || !conversationRepository.findRole(id, *subject)) {
               response.result(http::status::forbidden);
@@ -382,17 +425,8 @@ int main() {
           }
         }
       } else if (request.method() == http::verb::post &&
-                 std::regex_match(
-                     std::string(request.target()),
-                     std::regex(
-                         R"(^/conversations/[0-9a-fA-F-]{36}/messages$)"))) {
-        const std::string target(request.target());
-
-        const std::string conversationId =
-            target.substr(std::string("/conversations/").size(), 36);
-
-        const std::regex uuidPattern(
-            R"(^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)");
+                 messageConversationId) {
+        const auto& conversationId = *messageConversationId;
 
         const auto authorization = request[http::field::authorization];
 
@@ -409,7 +443,7 @@ int main() {
           response.result(http::status::unauthorized);
           response.body() = R"({"error":"UNAUTHORIZED"})";
 
-        } else if (!std::regex_match(conversationId, uuidPattern)) {
+        } else if (!common::security::isUuid(conversationId)) {
           response.result(http::status::bad_request);
           response.body() = R"({"error":"INVALID_CONVERSATION_ID"})";
 
@@ -429,10 +463,6 @@ int main() {
 
               response.result(http::status::forbidden);
               response.body() = R"({"error":"FORBIDDEN"})";
-
-            } else if (request.body().size() > 2 * 1024 * 1024) {
-              response.result(http::status::bad_request);
-              response.body() = R"({"error":"MESSAGE_TOO_LARGE"})";
 
             } else {
               const auto body =
@@ -467,7 +497,7 @@ int main() {
                 const auto ciphertext =
                     decodeBase64(ciphertextBase64, 1024 * 1024);
 
-                if (!std::regex_match(messageId, uuidPattern) ||
+                if (!common::security::isUuid(messageId) ||
                     !nonce.has_value() ||
                     nonce->size() != crypto_secretbox_NONCEBYTES ||
                     !ciphertext.has_value() ||
@@ -526,17 +556,8 @@ int main() {
           }
         }
       } else if (request.method() == http::verb::get &&
-                 std::regex_match(
-                     std::string(request.target()),
-                     std::regex(
-                         R"(^/conversations/[0-9a-fA-F-]{36}/messages$)"))) {
-        const std::string target(request.target());
-
-        const std::string conversationId =
-            target.substr(std::string("/conversations/").size(), 36);
-
-        const std::regex uuidPattern(
-            R"(^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)");
+                 messageConversationId) {
+        const auto& conversationId = *messageConversationId;
 
         const auto authorization = request[http::field::authorization];
         const std::string authValue(authorization.data(), authorization.size());
@@ -551,7 +572,7 @@ int main() {
           response.result(http::status::unauthorized);
           response.body() = R"({"error":"UNAUTHORIZED"})";
 
-        } else if (!std::regex_match(conversationId, uuidPattern)) {
+        } else if (!common::security::isUuid(conversationId)) {
           response.result(http::status::bad_request);
           response.body() = R"({"error":"INVALID_CONVERSATION_ID"})";
 
@@ -608,9 +629,7 @@ int main() {
       response.prepare_payload();
 
       // Send the HTTP response.
-      http::write(socket, response);
-
-      beast::error_code error;
+      http::write(socket, response, error);
       socket.shutdown(tcp::socket::shutdown_both, error);
     }
   } catch (const std::exception& e) {
