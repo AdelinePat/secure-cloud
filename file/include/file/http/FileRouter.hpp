@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include "common/audit/AuditClient.hpp"
 #include "file/domain/FileRecord.hpp"
 #include "file/http/HttpServer.hpp"
 #include "file/repositories/IFileRepository.hpp"
@@ -25,6 +26,10 @@ inline constexpr std::int64_t kMaxFileBytes = 2LL * 1024 * 1024 * 1024;
 using TokenVerifier =
     std::function<std::optional<std::string>(const std::string& token)>;
 
+// Receives security-relevant events (common::audit::Client::emit in
+// production). Must not throw; an empty function disables auditing.
+using AuditEmitter = std::function<void(const common::audit::Event& event)>;
+
 // Maps HTTP requests to file operations. Paths are the file service's
 // internal ones (the gateway strips its public prefix).
 //
@@ -37,10 +42,19 @@ using TokenVerifier =
 //
 // Access is membership of the file's conversation. Only the uploader may
 // send chunks or complete the upload.
+//
+// Audit events (target_id = file id unless noted):
+//   file_upload_started   upload created
+//   file_uploaded         upload completed (first time only)
+//   file_download_started chunk 0 fetched (one event per download, not per chunk)
+//   file_deleted          file deleted
+//   file_access_denied    any 403 (outcome "failure"; target_id is the
+//                         conversation id when creating)
 class FileRouter {
  public:
   FileRouter(repositories::IFileRepository& repository,
-             storage::IChunkStorage& storage, TokenVerifier verifyToken);
+             storage::IChunkStorage& storage, TokenVerifier verifyToken,
+             AuditEmitter audit = {});
 
   Response route(const Request& request);
 
@@ -60,9 +74,29 @@ class FileRouter {
   Response deleteFile(const Request& request, const std::string& userId,
                       const std::string& fileId);
 
+  // The file and the caller's role in its conversation, or the 404/403 to
+  // send instead (403s are audited with the given action).
+  struct Access {
+    std::optional<domain::FileRecord> file;
+    std::string role;
+    std::optional<Response> error;
+  };
+  Access loadAccessible(const Request& request, const std::string& fileId,
+                        const std::string& userId, const char* action);
+
+  // Emits file_access_denied and returns 403 FORBIDDEN.
+  Response deny(const Request& request, const std::string& userId,
+                const char* action, const std::string& targetId,
+                const std::string& conversationId, const char* reason);
+
+  void emit(const char* eventType, const std::string& userId,
+            const std::string& targetId, nlohmann::json metadata,
+            const char* outcome = "success");
+
   repositories::IFileRepository& repository_;
   storage::IChunkStorage& storage_;
   TokenVerifier verifyToken_;
+  AuditEmitter audit_;
 };
 
 }  // namespace file::http

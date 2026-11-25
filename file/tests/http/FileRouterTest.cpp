@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "TempDir.hpp"
 #include "file/storage/ChunkStorage.hpp"
@@ -91,10 +92,23 @@ class FileRouterTest : public ::testing::Test {
     return "/files/" + id + "/chunks/" + std::to_string(n);
   }
 
+  // Audit events of a given type, in emission order.
+  std::vector<common::audit::Event> eventsOfType(const std::string& type) const {
+    std::vector<common::audit::Event> result;
+    for (const auto& event : events_) {
+      if (event.event_type == type) result.push_back(event);
+    }
+    return result;
+  }
+
   file::test::TempDir dir_;
   InMemoryFileRepository repository_;
   file::storage::FilesystemChunkStorage storage_{dir_.path()};
-  FileRouter router_{repository_, storage_, fakeVerify};
+  std::vector<common::audit::Event> events_;
+  FileRouter router_{repository_, storage_, fakeVerify,
+                     [this](const common::audit::Event& event) {
+                       events_.push_back(event);
+                     }};
 };
 
 }  // namespace
@@ -450,4 +464,102 @@ TEST_F(FileRouterTest, PlainMemberCannotDeleteSomeoneElsesFile) {
   EXPECT_EQ(call(verb::delete_, "/files/" + id, "eve").result(),
             status::forbidden);
   EXPECT_EQ(call(verb::get, chunk(id, 0), "bob").result(), status::ok);
+}
+
+// ── audit events ───────────────────────────────────────────────────────────
+
+TEST_F(FileRouterTest, AuditsTheUploadLifecycle) {
+  const auto id = availableFile();
+
+  auto started = eventsOfType("file_upload_started");
+  ASSERT_EQ(started.size(), 1u);
+  EXPECT_EQ(started[0].actor_id, kAlice);
+  EXPECT_EQ(started[0].target_id, id);
+  EXPECT_EQ(started[0].outcome, "success");
+  EXPECT_EQ(started[0].metadata["conversation_id"], kConversation);
+  EXPECT_EQ(started[0].metadata["size_bytes"], 11);
+  EXPECT_EQ(started[0].metadata["chunk_count"], 2);
+
+  auto uploaded = eventsOfType("file_uploaded");
+  ASSERT_EQ(uploaded.size(), 1u);
+  EXPECT_EQ(uploaded[0].target_id, id);
+
+  // Retrying complete does not log a second upload.
+  call(verb::post, "/files/" + id + "/complete", "alice");
+  EXPECT_EQ(eventsOfType("file_uploaded").size(), 1u);
+}
+
+TEST_F(FileRouterTest, FailedCompleteIsNotAuditedAsUploaded) {
+  const auto id = createFile(10, 2);
+  call(verb::post, "/files/" + id + "/complete", "alice");
+  EXPECT_TRUE(eventsOfType("file_uploaded").empty());
+}
+
+TEST_F(FileRouterTest, AuditsDownloadOncePerDownloadNotPerChunk) {
+  const auto id = availableFile();
+  call(verb::get, chunk(id, 0), "bob");
+  call(verb::get, chunk(id, 1), "bob");
+
+  auto downloads = eventsOfType("file_download_started");
+  ASSERT_EQ(downloads.size(), 1u);
+  EXPECT_EQ(downloads[0].actor_id, kBob);
+  EXPECT_EQ(downloads[0].target_id, id);
+}
+
+TEST_F(FileRouterTest, AuditsDeletionAndWhoDidIt) {
+  const auto id = availableFile();
+  call(verb::delete_, "/files/" + id, "alice");
+
+  auto deleted = eventsOfType("file_deleted");
+  ASSERT_EQ(deleted.size(), 1u);
+  EXPECT_EQ(deleted[0].actor_id, kAlice);
+  EXPECT_EQ(deleted[0].metadata["deleted_by"], "uploader");
+}
+
+TEST_F(FileRouterTest, AuditsEveryForbiddenAccess) {
+  const auto id = availableFile();
+  events_.clear();
+
+  call(verb::post, "/files", "eve",
+       json{{"conversation_id", kConversation},
+            {"size_bytes", 5},
+            {"chunk_count", 1}}
+           .dump());
+  call(verb::get, chunk(id, 0), "eve");
+  call(verb::delete_, "/files/" + id, "bob");
+
+  auto denied = eventsOfType("file_access_denied");
+  ASSERT_EQ(denied.size(), 3u);
+  for (const auto& event : denied) EXPECT_EQ(event.outcome, "failure");
+
+  EXPECT_EQ(denied[0].actor_id, kEve);
+  EXPECT_EQ(denied[0].target_id, kConversation);
+  EXPECT_EQ(denied[0].metadata["action"], "create");
+  EXPECT_EQ(denied[0].metadata["reason"], "not_a_participant");
+
+  EXPECT_EQ(denied[1].target_id, id);
+  EXPECT_EQ(denied[1].metadata["action"], "download");
+
+  EXPECT_EQ(denied[2].actor_id, kBob);
+  EXPECT_EQ(denied[2].metadata["action"], "delete");
+  EXPECT_EQ(denied[2].metadata["reason"], "not_uploader_or_admin");
+
+  EXPECT_EQ(events_.size(), 3u);  // nothing else was logged
+}
+
+TEST_F(FileRouterTest, UnauthenticatedAndNotFoundRequestsAreNotAudited) {
+  call(verb::get, "/files/" + kUnknownFile);
+  call(verb::get, "/files/" + kUnknownFile, "alice");
+  EXPECT_TRUE(events_.empty());
+}
+
+TEST_F(FileRouterTest, WorksWithoutAnAuditEmitter) {
+  FileRouter router(repository_, storage_, fakeVerify);
+  auto response = router.route(makeRequest(verb::post, "/files", "eve",
+                                           json{{"conversation_id",
+                                                 kConversation},
+                                                {"size_bytes", 5},
+                                                {"chunk_count", 1}}
+                                               .dump()));
+  EXPECT_EQ(response.result(), status::forbidden);
 }

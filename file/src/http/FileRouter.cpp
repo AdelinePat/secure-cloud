@@ -117,33 +117,6 @@ json toJson(const domain::FileRecord& file) {
            file.completed_at ? json(*file.completed_at) : json(nullptr)}};
 }
 
-// A file the caller may see, with their role in its conversation, or the
-// error response to send instead.
-struct Access {
-  std::optional<domain::FileRecord> file;
-  std::string role;
-  std::optional<Response> error;
-};
-
-Access loadAccessible(repositories::IFileRepository& repository,
-                      const Request& request, const std::string& fileId,
-                      const std::string& userId) {
-  Access access;
-  access.file = repository.findById(fileId);
-  if (!access.file) {
-    access.error = errorResponse(request, status::not_found, "FILE_NOT_FOUND");
-    return access;
-  }
-  const auto role =
-      repository.findParticipantRole(access.file->conversation_id, userId);
-  if (!role) {
-    access.error = errorResponse(request, status::forbidden, "FORBIDDEN");
-    return access;
-  }
-  access.role = *role;
-  return access;
-}
-
 bool isUploader(const domain::FileRecord& file, const std::string& userId) {
   return file.user_id.has_value() && *file.user_id == userId;
 }
@@ -152,10 +125,57 @@ bool isUploader(const domain::FileRecord& file, const std::string& userId) {
 
 FileRouter::FileRouter(repositories::IFileRepository& repository,
                        storage::IChunkStorage& storage,
-                       TokenVerifier verifyToken)
+                       TokenVerifier verifyToken, AuditEmitter audit)
     : repository_(repository),
       storage_(storage),
-      verifyToken_(std::move(verifyToken)) {}
+      verifyToken_(std::move(verifyToken)),
+      audit_(std::move(audit)) {}
+
+void FileRouter::emit(const char* eventType, const std::string& userId,
+                      const std::string& targetId, json metadata,
+                      const char* outcome) {
+  if (!audit_) return;
+  common::audit::Event event;
+  event.event_type = eventType;
+  event.actor_id = userId;
+  event.target_id = targetId;
+  event.outcome = outcome;
+  event.metadata = std::move(metadata);
+  audit_(event);
+}
+
+Response FileRouter::deny(const Request& request, const std::string& userId,
+                          const char* action, const std::string& targetId,
+                          const std::string& conversationId,
+                          const char* reason) {
+  emit("file_access_denied", userId, targetId,
+       {{"action", action},
+        {"conversation_id", conversationId},
+        {"reason", reason}},
+       "failure");
+  return errorResponse(request, status::forbidden, "FORBIDDEN");
+}
+
+FileRouter::Access FileRouter::loadAccessible(const Request& request,
+                                              const std::string& fileId,
+                                              const std::string& userId,
+                                              const char* action) {
+  Access access;
+  access.file = repository_.findById(fileId);
+  if (!access.file) {
+    access.error = errorResponse(request, status::not_found, "FILE_NOT_FOUND");
+    return access;
+  }
+  const auto role =
+      repository_.findParticipantRole(access.file->conversation_id, userId);
+  if (!role) {
+    access.error = deny(request, userId, action, fileId,
+                        access.file->conversation_id, "not_a_participant");
+    return access;
+  }
+  access.role = *role;
+  return access;
+}
 
 std::optional<std::string> FileRouter::authenticate(
     const Request& request) const {
@@ -266,7 +286,8 @@ Response FileRouter::createFile(const Request& request,
 
   const auto conversationId = body["conversation_id"].get<std::string>();
   if (!repository_.findParticipantRole(conversationId, userId)) {
-    return errorResponse(request, status::forbidden, "FORBIDDEN");
+    return deny(request, userId, "create", conversationId, conversationId,
+                "not_a_participant");
   }
 
   domain::FileRecord file;
@@ -276,12 +297,16 @@ Response FileRouter::createFile(const Request& request,
   file.chunk_count = static_cast<int32_t>(*chunkCount);
 
   const auto stored = repository_.create(file);
+  emit("file_upload_started", userId, stored.id,
+       {{"conversation_id", stored.conversation_id},
+        {"size_bytes", stored.size_bytes},
+        {"chunk_count", stored.chunk_count}});
   return jsonResponse(request, status::created, toJson(stored).dump());
 }
 
 Response FileRouter::getFile(const Request& request, const std::string& userId,
                              const std::string& fileId) {
-  auto access = loadAccessible(repository_, request, fileId, userId);
+  auto access = loadAccessible(request, fileId, userId, "metadata");
   if (access.error) return std::move(*access.error);
 
   auto result = toJson(*access.file);
@@ -298,12 +323,13 @@ Response FileRouter::getFile(const Request& request, const std::string& userId,
 
 Response FileRouter::putChunk(const Request& request, const std::string& userId,
                               const std::string& fileId, int32_t index) {
-  auto access = loadAccessible(repository_, request, fileId, userId);
+  auto access = loadAccessible(request, fileId, userId, "upload_chunk");
   if (access.error) return std::move(*access.error);
   const auto& file = *access.file;
 
   if (!isUploader(file, userId)) {
-    return errorResponse(request, status::forbidden, "FORBIDDEN");
+    return deny(request, userId, "upload_chunk", fileId, file.conversation_id,
+                "not_the_uploader");
   }
   if (file.status != "UPLOADING") {
     return errorResponse(request, status::conflict, "FILE_NOT_UPLOADING");
@@ -335,12 +361,13 @@ Response FileRouter::putChunk(const Request& request, const std::string& userId,
 Response FileRouter::completeFile(const Request& request,
                                   const std::string& userId,
                                   const std::string& fileId) {
-  auto access = loadAccessible(repository_, request, fileId, userId);
+  auto access = loadAccessible(request, fileId, userId, "complete");
   if (access.error) return std::move(*access.error);
   const auto& file = *access.file;
 
   if (!isUploader(file, userId)) {
-    return errorResponse(request, status::forbidden, "FORBIDDEN");
+    return deny(request, userId, "complete", fileId, file.conversation_id,
+                "not_the_uploader");
   }
   if (file.status == "AVAILABLE") {
     // Retrying after a lost response is harmless.
@@ -377,6 +404,10 @@ Response FileRouter::completeFile(const Request& request,
   }
 
   repository_.updateStatus(fileId, "AVAILABLE");
+  emit("file_uploaded", userId, fileId,
+       {{"conversation_id", file.conversation_id},
+        {"size_bytes", file.size_bytes},
+        {"chunk_count", file.chunk_count}});
   const auto updated = repository_.findById(fileId);
   return jsonResponse(request, status::ok,
                       toJson(updated ? *updated : file).dump());
@@ -384,7 +415,7 @@ Response FileRouter::completeFile(const Request& request,
 
 Response FileRouter::getChunk(const Request& request, const std::string& userId,
                               const std::string& fileId, int32_t index) {
-  auto access = loadAccessible(repository_, request, fileId, userId);
+  auto access = loadAccessible(request, fileId, userId, "download");
   if (access.error) return std::move(*access.error);
   const auto& file = *access.file;
 
@@ -403,6 +434,12 @@ Response FileRouter::getChunk(const Request& request, const std::string& userId,
                          "STORAGE_ERROR");
   }
 
+  if (index == 0) {
+    emit("file_download_started", userId, fileId,
+         {{"conversation_id", file.conversation_id},
+          {"size_bytes", file.size_bytes}});
+  }
+
   Response response{status::ok, request.version()};
   response.set(beast_http::field::server, "SecureChat-File");
   response.set(beast_http::field::content_type, "application/octet-stream");
@@ -413,14 +450,20 @@ Response FileRouter::getChunk(const Request& request, const std::string& userId,
 Response FileRouter::deleteFile(const Request& request,
                                 const std::string& userId,
                                 const std::string& fileId) {
-  auto access = loadAccessible(repository_, request, fileId, userId);
+  auto access = loadAccessible(request, fileId, userId, "delete");
   if (access.error) return std::move(*access.error);
 
-  if (!isUploader(*access.file, userId) && access.role != "admin") {
-    return errorResponse(request, status::forbidden, "FORBIDDEN");
+  const auto& file = *access.file;
+  const bool uploader = isUploader(file, userId);
+  if (!uploader && access.role != "admin") {
+    return deny(request, userId, "delete", fileId, file.conversation_id,
+                "not_uploader_or_admin");
   }
 
   repository_.softDelete(fileId);
+  emit("file_deleted", userId, fileId,
+       {{"conversation_id", file.conversation_id},
+        {"deleted_by", uploader ? "uploader" : "admin"}});
   try {
     storage_.removeFile(fileId);
   } catch (const std::exception& e) {

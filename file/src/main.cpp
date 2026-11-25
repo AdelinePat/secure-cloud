@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "common/audit/AuditClient.hpp"
 #include "common/jwt/JwtVerifier.hpp"
 #include "file/http/FileRouter.hpp"
 #include "file/http/HttpServer.hpp"
@@ -70,10 +71,22 @@ int main() {
 
     file::storage::FilesystemChunkStorage storage(storageDir);
 
+    // Best-effort emitter for security-relevant events. Disabled unless
+    // AUDIT_ENABLED is true; a failure never affects file requests.
+    const auto auditConfig = common::audit::Config::fromEnv("file");
+    common::audit::Client auditClient(auditConfig);
+    if (auditClient.enabled()) {
+      std::cout << "Audit emitter enabled -> " << auditConfig.url << " as "
+                << auditClient.serviceName() << std::endl;
+    }
+
     file::http::FileRouter router(
         repository, storage,
         [&jwtVerifier](const std::string& token) {
           return jwtVerifier.verify(token);
+        },
+        [&auditClient](const common::audit::Event& event) {
+          auditClient.emit(event);
         });
 
     boost::asio::io_context ioContext;

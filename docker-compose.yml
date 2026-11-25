@@ -167,6 +167,13 @@ services:
       FILE_PORT: "8083"
       FILE_STORAGE_DIR: "/app/file-storage"
       FILE_JWT_PUBLIC_KEY_PATH: "/app/jwt/public.pem"
+      AUDIT_ENABLED: "true"
+      AUDIT_URL: "https://audit:8085"
+      AUDIT_SERVICE_NAME: "file"
+      AUDIT_TLS_CERT: "/app/certs/file/file.crt"
+      AUDIT_TLS_KEY: "/app/certs/file/file.key"
+      AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
+      AUDIT_SPOOL_DIR: "/app/audit-spool/file"
       DB_HOST: "app-db"
       DB_PORT: ${DB_PORT}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -196,6 +203,9 @@ services:
       - type: volume
         source: file-storage
         target: /app/file-storage
+      - type: volume
+        source: audit-spool
+        target: /app/audit-spool
     command: [ "bash", "./secureChat.sh", "run", "file" ]
 
   audit:

@@ -257,9 +257,8 @@ the service name to run them for all of them.
 - Stores append-only, hash-chained audit events in MongoDB (`auditLogs`).
 - Speaks HTTPS + mutual TLS to other services only (not exposed by the gateway).
 - API contract: [`_Docs/API/Audit_API.md`](_Docs/API/Audit_API.md).
-- `auth` and `messaging` emit events through the shared client in
-  `common/audit/` (enabled by `AUDIT_ENABLED=true` in Compose). `file` has no
-  HTTP API yet, so it does not emit.
+- `auth`, `messaging` and `file` emit events through the shared client in
+  `common/audit/` (enabled by `AUDIT_ENABLED=true` in Compose).
 
 Host dependencies (the Docker image already has them):
 

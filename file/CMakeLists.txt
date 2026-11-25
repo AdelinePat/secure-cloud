@@ -15,6 +15,12 @@ find_package(Threads REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_library(SODIUM_LIBRARY NAMES sodium REQUIRED)
 
+# ── shared audit emitter (mTLS client to the audit service) ────────────────
+add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/audit"
+    "${CMAKE_BINARY_DIR}/common-audit"
+)
+
 # ── shared JWT verifier (tokens issued by the auth service) ────────────────
 add_subdirectory(
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/jwt"
@@ -45,6 +51,7 @@ if(FILE_LIB_SOURCES)
         Boost::headers
         Threads::Threads
         nlohmann_json::nlohmann_json
+        securechat_audit_client
     )
 
     target_compile_options(file_lib PRIVATE
