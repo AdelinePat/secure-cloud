@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id uuid NOT NULL,
   user_id uuid,
-  ciphertext text NOT NULL,
+  ciphertext bytea NOT NULL,  -- raw bytes; the repository round-trips them as hex
   nonce text NOT NULL,
   encryption_version int NOT NULL DEFAULT 1,
   server_timestamp timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
