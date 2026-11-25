@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iomanip>
 #include <map>
 #include <random>
 #include <sstream>
@@ -73,11 +74,15 @@ class InMemoryFileRepository : public IFileRepository {
   std::map<std::pair<std::string, int32_t>, domain::FileChunk> chunks_;
   std::map<std::pair<std::string, std::string>, std::string> participants_;
 
+  // UUID-shaped, like Postgres' gen_random_uuid().
   static std::string generateId() {
     static std::mt19937_64 rng{std::random_device{}()};
     std::ostringstream oss;
-    oss << std::hex << rng();
-    return oss.str();
+    oss << std::hex << std::setfill('0') << std::setw(16) << rng()
+        << std::setw(16) << rng();
+    std::string hex = oss.str();
+    return hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) +
+           "-" + hex.substr(16, 4) + "-" + hex.substr(20, 12);
   }
 };
 

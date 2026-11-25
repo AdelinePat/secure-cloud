@@ -16,6 +16,7 @@
 #include "file/http/FileRouter.hpp"
 #include "file/http/HttpServer.hpp"
 #include "file/repositories/PostgresFileRepository.hpp"
+#include "file/storage/ChunkStorage.hpp"
 
 namespace {
 
@@ -55,7 +56,6 @@ int main() {
     // Ciphertext chunks are stored here as <file_id>/<chunk_index>.
     const std::filesystem::path storageDir =
         envOr("FILE_STORAGE_DIR", "/app/file-storage");
-    std::filesystem::create_directories(storageDir);
 
     common::jwt::JwtVerifier jwtVerifier(
         requireEnv("FILE_JWT_PUBLIC_KEY_PATH"));
@@ -68,8 +68,10 @@ int main() {
     file::repositories::PostgresFileRepository repository(dbConnection);
     std::cout << "File service connected to PostgreSQL" << std::endl;
 
+    file::storage::FilesystemChunkStorage storage(storageDir);
+
     file::http::FileRouter router(
-        repository,
+        repository, storage,
         [&jwtVerifier](const std::string& token) {
           return jwtVerifier.verify(token);
         });

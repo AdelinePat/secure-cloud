@@ -44,6 +44,7 @@ if(FILE_LIB_SOURCES)
         libpqxx::pqxx
         Boost::headers
         Threads::Threads
+        nlohmann_json::nlohmann_json
     )
 
     target_compile_options(file_lib PRIVATE

@@ -64,8 +64,10 @@ bool PostgresFileRepository::updateStatus(const std::string& id,
                                           const std::string& status) {
   pqxx::work txn(conn_);
   auto result = txn.exec_params(
-      "UPDATE files SET status = $1, "
-      "  completed_at = CASE WHEN $1 = 'AVAILABLE' THEN CURRENT_TIMESTAMP "
+      // Explicit casts: Postgres cannot deduce one type for $1 from both uses.
+      "UPDATE files SET status = $1::varchar, "
+      "  completed_at = CASE WHEN $1::varchar = 'AVAILABLE' "
+      "                      THEN CURRENT_TIMESTAMP "
       "                      ELSE completed_at END "
       "WHERE id = $2 AND deleted_at IS NULL",
       status, id);
