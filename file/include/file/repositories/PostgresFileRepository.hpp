@@ -14,6 +14,10 @@ class PostgresFileRepository : public IFileRepository {
   std::optional<domain::FileRecord> findById(const std::string& id) override;
   bool updateStatus(const std::string& id, const std::string& status) override;
   bool softDelete(const std::string& id) override;
+  void upsertChunk(const domain::FileChunk& chunk) override;
+  std::vector<domain::FileChunk> listChunks(const std::string& fileId) override;
+  std::optional<std::string> findParticipantRole(
+      const std::string& conversationId, const std::string& userId) override;
 
  private:
   pqxx::connection& conn_;

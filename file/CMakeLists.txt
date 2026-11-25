@@ -10,6 +10,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(OpenSSL REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(libpqxx REQUIRED)
+find_package(Boost REQUIRED)
+find_package(Threads REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_library(SODIUM_LIBRARY NAMES sodium REQUIRED)
+
+# ── shared JWT verifier (tokens issued by the auth service) ────────────────
+add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/jwt"
+    "${CMAKE_BINARY_DIR}/common-jwt"
+)
 
 # ── file library (all logic, no main) ──────────────────────────────────────
 # Everything under src/ except main.cpp — main.cpp stays exclusive to the
@@ -32,6 +42,8 @@ if(FILE_LIB_SOURCES)
         OpenSSL::SSL
         OpenSSL::Crypto
         libpqxx::pqxx
+        Boost::headers
+        Threads::Threads
     )
 
     target_compile_options(file_lib PRIVATE
@@ -53,6 +65,13 @@ target_include_directories(file PRIVATE
 if(TARGET file_lib)
     target_link_libraries(file PRIVATE file_lib)
 endif()
+
+target_link_libraries(file PRIVATE
+    Boost::headers
+    Threads::Threads
+    securechat_jwt
+    ${SODIUM_LIBRARY}
+)
 
 target_compile_options(file PRIVATE
     -Wall -Wextra -Wpedantic

@@ -1,4 +1,4 @@
-#include "messaging/security/JwtVerifier.hpp"
+#include "common/jwt/JwtVerifier.hpp"
 
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
@@ -15,7 +15,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace messaging::security {
+namespace common::jwt {
 
 namespace {
 
@@ -203,4 +203,4 @@ std::optional<std::string> JwtVerifier::verify(const std::string& token) const {
   }
 }
 
-}  // namespace messaging::security
+}  // namespace common::jwt

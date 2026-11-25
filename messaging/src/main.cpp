@@ -19,7 +19,7 @@
 #include "common/audit/AuditClient.hpp"
 #include "messaging/repositories/PostgresConversationRepository.hpp"
 #include "messaging/repositories/PostgresMessageRepository.hpp"
-#include "messaging/security/JwtVerifier.hpp"
+#include "common/jwt/JwtVerifier.hpp"
 
 namespace asio = boost::asio;
 namespace beast = boost::beast;
@@ -75,7 +75,7 @@ int main() {
     }
 
     // Load the Auth public key once at startup.
-    messaging::security::JwtVerifier jwtVerifier(publicKeyPath);
+    common::jwt::JwtVerifier jwtVerifier(publicKeyPath);
 
     // Read the PostgreSQL connection settings.
     const char* dbHost = std::getenv("DB_HOST");

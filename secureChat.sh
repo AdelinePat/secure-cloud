@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # List of real services — the single source of truth for "all"
 SERVICES=(auth audit file messaging gateway)
 # Everything build/test/clean "all" iterates over: services + shared libraries
-TARGETS=("${SERVICES[@]}" audit-client)
+TARGETS=("${SERVICES[@]}" audit-client jwt)
 
 # ==================== COLORS ====================
 BLUE='\033[0;34m'
@@ -30,6 +30,7 @@ source_dir() {
         messaging) echo "$SCRIPT_DIR/messaging" ;;
         gateway) echo "$SCRIPT_DIR/gateway" ;;
         audit-client) echo "$SCRIPT_DIR/common/audit" ;;
+        jwt) echo "$SCRIPT_DIR/common/jwt" ;;
     esac
 }
 
@@ -41,6 +42,7 @@ build_dir() {
         messaging) echo "$SCRIPT_DIR/messaging/build" ;;
         gateway) echo "$SCRIPT_DIR/gateway/build" ;;
         audit-client) echo "$SCRIPT_DIR/common/audit/build" ;;
+        jwt) echo "$SCRIPT_DIR/common/jwt/build" ;;
     esac
 }
 
@@ -52,6 +54,7 @@ test_target() {
         messaging)  echo "messaging_tests" ;;
         gateway) echo "gateway_tests" ;;
         audit-client) echo "audit_client_tests" ;;
+        jwt) echo "jwt_tests" ;;
     esac
 }
 

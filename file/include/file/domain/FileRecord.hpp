@@ -6,18 +6,18 @@
 
 namespace file::domain {
 
+// Metadata of one end-to-end encrypted file. The server only knows sizes and
+// who may access it; name, type and key live in the encrypted chat message.
 struct FileRecord {
   std::string id;                       // empty when passed to create()
-  std::optional<std::string> user_id;
-  std::string filename;
-  std::optional<std::string> mime_type;
+  std::string conversation_id;
+  std::optional<std::string> user_id;   // uploader
   std::string status = "UPLOADING";     // "UPLOADING" | "AVAILABLE" | "FAILED" | "DELETED"
-  int64_t size_bytes = 0;
-  std::string checksum;                 // sha256 of the ciphertext
-  std::string storage_ref;              // MinIO/Garage object key
-  std::string encryption_algorithm = "AES-256-GCM";
-  std::string nonce;
+  int64_t size_bytes = 0;               // total ciphertext size
+  int32_t chunk_count = 0;
+  std::string encryption_algorithm = "xchacha20poly1305-secretstream";
   std::string created_at;               // ISO8601, populated by the store
+  std::optional<std::string> completed_at;
 };
 
 }  // namespace file::domain

@@ -159,9 +159,14 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
+      jwt-keys:
+        condition: service_completed_successfully
       app-db:
         condition: service_healthy
     environment:
+      FILE_PORT: "8083"
+      FILE_STORAGE_DIR: "/app/file-storage"
+      FILE_JWT_PUBLIC_KEY_PATH: "/app/jwt/public.pem"
       DB_HOST: "app-db"
       DB_PORT: ${DB_PORT}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -171,9 +176,17 @@ services:
       - type: bind
         source: ./certs/ca/ca.crt
         target: /app/certs/ca/ca.crt
+      # Public key only (published by jwt-keys), as for messaging.
+      - type: volume
+        source: jwt-public
+        target: /app/jwt
+        read_only: true
       - type: bind
         source: ./certs/file
         target: /app/certs/file
+      - type: bind
+        source: ./common
+        target: /app/common
       - type: bind
         source: ./file
         target: /app/file
@@ -235,12 +248,13 @@ services:
       - type: bind
         source: ./auth/db/0001_auth_init.sql
         target: /docker-entrypoint-initdb.d/01_auth_init.sql
-      - type: bind
-        source: ./file/db/0001_file_init.sql
-        target: /docker-entrypoint-initdb.d/02_file_init.sql
+      # Order matters: files references conversations (messaging).
       - type: bind
         source: ./messaging/db/0001_messaging_init.sql
-        target: /docker-entrypoint-initdb.d/03_messaging_init.sql
+        target: /docker-entrypoint-initdb.d/02_messaging_init.sql
+      - type: bind
+        source: ./file/db/0001_file_init.sql
+        target: /docker-entrypoint-initdb.d/03_file_init.sql
       - type: bind
         source: ./auth/db/auth_seed.sql
         target: /docker-entrypoint-initdb.d/04_auth_seed.sql

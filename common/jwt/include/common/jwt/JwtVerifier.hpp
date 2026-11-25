@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace messaging::security {
+namespace common::jwt {
 
 class JwtVerifier {
  public:
@@ -24,4 +24,4 @@ class JwtVerifier {
   std::unique_ptr<EVP_PKEY, KeyDeleter> publicKey_;
 };
 
-}  // namespace messaging::security
+}  // namespace common::jwt

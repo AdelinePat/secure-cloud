@@ -22,6 +22,12 @@ add_subdirectory(
     "${CMAKE_BINARY_DIR}/common-audit"
 )
 
+# ── shared JWT verifier (tokens issued by the auth service) ────────────────
+add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/jwt"
+    "${CMAKE_BINARY_DIR}/common-jwt"
+)
+
 # ── messaging library (all logic, no main) ──────────────────────────────────
 # Everything under src/ except main.cpp — main.cpp stays exclusive to the
 # `messaging` executable below, so it's never compiled into two objects at once.
@@ -72,6 +78,7 @@ target_link_libraries(messaging PRIVATE
     Boost::headers
     Threads::Threads
     securechat_audit_client
+    securechat_jwt
 )
 
 target_compile_options(messaging PRIVATE
