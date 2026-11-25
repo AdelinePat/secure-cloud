@@ -190,6 +190,41 @@ http::response<http::string_body> HttpRouter::route(
     }
   }
 
+  // Proxy file requests to the file service. Paths are forwarded unchanged
+  // (/files/...); the file service checks the token, methods and access.
+  if (isFileRoute(request.target())) {
+    const char* fileHost = std::getenv("FILE_HOST");
+    const char* filePort = std::getenv("FILE_PORT");
+
+    const std::string host = fileHost ? fileHost : "file";
+    const std::uint16_t port =
+        filePort ? static_cast<std::uint16_t>(std::stoi(filePort)) : 8083;
+
+    // Copy the request to keep its body and Authorization header.
+    http::request<http::string_body> fileRequest = request;
+
+    fileRequest.set(http::field::host, host);
+    fileRequest.keep_alive(false);
+    fileRequest.erase(http::field::cookie);
+
+    try {
+      return httpClient_.send(host, port, fileRequest);
+
+    } catch (const std::exception& exception) {
+      std::cerr << "File upstream error: " << exception.what() << '\n';
+
+      http::response<http::string_body> response{http::status::bad_gateway,
+                                                 request.version()};
+
+      response.set(http::field::content_type, "application/json");
+      response.body() = R"({"error":"FILE_SERVICE_UNAVAILABLE"})";
+      response.keep_alive(false);
+      response.prepare_payload();
+
+      return response;
+    }
+  }
+
   // Route 3: Proxy Auth login and refresh requests.
   if (request.target() == "/auth/login" ||
       request.target() == "/auth/refresh") {
@@ -239,5 +274,14 @@ http::response<http::string_body> HttpRouter::route(
 }
 
 HttpRouter::HttpRouter(HttpClient& httpClient) : httpClient_(httpClient) {}
+
+bool HttpRouter::isFileRoute(std::string_view target) {
+  const std::string_view path = target.substr(0, target.find('?'));
+  return path == "/files" || path.starts_with("/files/");
+}
+
+std::size_t HttpRouter::bodyLimitFor(std::string_view target) {
+  return isFileRoute(target) ? kFileBodyLimit : kDefaultBodyLimit;
+}
 
 }  // namespace gateway
