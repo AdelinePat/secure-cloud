@@ -1,6 +1,15 @@
 #include <sodium.h>
 
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QPointer>
+#include <QInputDialog>
+#include <QApplication>
+#include <QStandardPaths>
+#include <QUuid>
+#include "crypto/PeerTrustStore.hpp"
+#include "crypto/KeyManager.hpp"
+#include "crypto/MessageCrypto.hpp"
 #include <QJsonObject>
 #include <QStatusBar>
 #include <QTcpServer>
@@ -21,9 +30,40 @@ class TestMainWindow : public QObject {
 
 void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(sodium_init() >= 0);
+  QStandardPaths::setTestModeEnabled(true);
+  const auto peer = crypto::KeyManager::generateKeyPair();
+  const auto replacement = crypto::KeyManager::generateKeyPair();
+  const auto localId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const QString peerId = "550e8400-e29b-41d4-a716-446655440001";
+  const QString otherPeerId = "550e8400-e29b-41d4-a716-446655440002";
+  auto offeredPeer = peerId;
+  auto offeredKey = peer.publicKey;
+  bool passphrasePromptShown = false;
+  QTimer dialogTimer;
+  connect(&dialogTimer, &QTimer::timeout, this, [&] {
+    if (auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget())) {
+      passphrasePromptShown = true;
+      dialog->reject();
+    }
+  });
+  dialogTimer.start(20);
   QTcpServer server;
   QVERIFY(server.listen(QHostAddress::LocalHost, 0));
   QList<QByteArray> requests;
+  crypto::PublicKey clientPublicKey{};
+  bool identityPublished = false;
+  bool rejectRefresh = false;
+  bool holdNextHistory = false;
+  QPointer<QTcpSocket> heldHistory;
+  QByteArray groupHistory = R"({"messages":[]})";
+  int groupHistoryRequests = 0;
+  const auto respond = [](QTcpSocket* socket, const QByteArray& body,
+                          const QByteArray& status) {
+    socket->write("HTTP/1.1 " + status +
+                  "\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " +
+                  QByteArray::number(body.size()) + "\r\n\r\n" + body);
+    socket->disconnectFromHost();
+  };
   connect(&server, &QTcpServer::newConnection, &server, [&]() {
     while (server.hasPendingConnections()) {
       auto* socket = server.nextPendingConnection();
@@ -44,24 +84,46 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
         requests.append(request);
         QByteArray body;
         if (request.startsWith("POST /auth/login ")) {
-          body =
-              R"({"user_id":"550e8400-e29b-41d4-a716-446655440000","access_token":"jwt-first","refresh_token":"refresh-first"})";
+          body = QJsonDocument(QJsonObject{
+              {"user_id", localId}, {"access_token", "jwt-first"},
+              {"refresh_token", "refresh-first"}}).toJson();
         } else if (request.startsWith("POST /auth/refresh ")) {
+          if (rejectRefresh) {
+            respond(socket, "{}", "401 Unauthorized");
+            return;
+          }
           body =
               R"({"access_token":"jwt-rotated","refresh_token":"refresh-rotated"})";
+        } else if (request.startsWith("PUT /messaging/identity-key ")) {
+          const auto publication = QJsonDocument::fromJson(request.mid(split + 4)).object();
+          const auto key = QByteArray::fromBase64(publication.value("public_key").toString().toLatin1());
+          if (key.size() == qsizetype(clientPublicKey.size())) {
+            std::copy(key.cbegin(), key.cend(), clientPublicKey.begin());
+            identityPublished = true;
+          }
+          body = R"({"status":"ok"})";
+        } else if (request.contains("/peer-key HTTP/1.1")) {
+          const auto key = QByteArray(reinterpret_cast<const char*>(offeredKey.data()),
+                                      offeredKey.size()).toBase64();
+          body = QJsonDocument(QJsonObject{{"user_id", offeredPeer},
+                                         {"public_key", QString::fromLatin1(key)}}).toJson();
         } else if (request.startsWith("GET /messaging/conversations ")) {
           body = R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"}])";
+        } else if (request.startsWith("GET /messaging/conversations/c/messages ")) {
+          ++groupHistoryRequests;
+          if (holdNextHistory) {
+            holdNextHistory = false;
+            heldHistory = socket;
+            return;
+          }
+          body = groupHistory;
         } else if (request.startsWith("GET /messaging/conversations/") &&
                    request.contains("/messages HTTP/1.1")) {
           body = R"({"messages":[]})";
         } else {
           body = R"({"id":"c","name":"New group"})";
         }
-        socket->write(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: "
-            "close\r\nContent-Length: " +
-            QByteArray::number(body.size()) + "\r\n\r\n" + body);
-        socket->disconnectFromHost();
+        respond(socket, body, "200 OK");
       });
     }
   });
@@ -85,7 +147,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
 
   QVERIFY(requests[1].contains("Authorization: Bearer jwt-first"));
   QCOMPARE(list->currentRow(), 0);
-  QVERIFY(send->isEnabled());
+  QTRY_VERIFY(send->isEnabled());
   input->setText("message A");
   send->click();
   input->setText("draft A");
@@ -93,6 +155,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(input->text().isEmpty());
   auto* view = window.findChild<QTextEdit*>();
   QVERIFY(view->toPlainText().isEmpty());
+  QTRY_VERIFY(send->isEnabled());
   input->setText("message B");
   send->click();
   input->setText("draft B");
@@ -134,6 +197,113 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
                             return request.startsWith("POST /auth/refresh ") &&
                                    request.contains("refresh-rotated");
                           }));
+
+  auto* historyTimer = window.findChild<QTimer*>("historyTimer");
+  QVERIFY(historyTimer);
+  QCOMPARE(historyTimer->interval(), 3000);
+  QVERIFY(identityPublished);
+  auto* ownFingerprint = window.findChild<QLabel*>("localFingerprintLabel");
+  QVERIFY(ownFingerprint);
+  QVERIFY(ownFingerprint->text().contains(
+      crypto::PeerTrustStore::fingerprint(clientPublicKey)));
+  QTRY_VERIFY(historyTimer->isActive());
+  QTRY_VERIFY(groupHistoryRequests >= 1);
+
+  // Simulate the peer encrypting a message for the selected conversation.
+  const auto keys = localId < peerId
+      ? crypto::KeyManager::deriveServerSessionKeys(
+            peer.publicKey, peer.privateKey, clientPublicKey)
+      : crypto::KeyManager::deriveClientSessionKeys(
+            peer.publicKey, peer.privateKey, clientPublicKey);
+  crypto::SessionKey conversationTx{};
+  QCOMPARE(crypto_generichash(conversationTx.data(), conversationTx.size(),
+                            reinterpret_cast<const unsigned char*>("c"), 1,
+                            keys.tx.data(), keys.tx.size()), 0);
+  const QString plaintext = "Automatically received from peer";
+  const auto encrypted =
+      crypto::MessageCrypto::encrypt(plaintext.toStdString(), conversationTx);
+  const auto encode = [](const auto& bytes) {
+    return QString::fromLatin1(
+        QByteArray(reinterpret_cast<const char*>(bytes.data()), bytes.size()).toBase64());
+  };
+  const QJsonObject message{{"message_id", "automatic-1"},
+                            {"user_id", peerId},
+                            {"encryption_version", 2},
+                            {"nonce", encode(encrypted.nonce)},
+                            {"ciphertext", encode(encrypted.ciphertext)}};
+  groupHistory = QJsonDocument(QJsonObject{{"messages", QJsonArray{message}}}).toJson();
+
+  holdNextHistory = true;
+  QTRY_VERIFY_WITH_TIMEOUT(heldHistory, 4500);
+  const int heldRequestCount = groupHistoryRequests;
+  QVERIFY(!view->toPlainText().contains(plaintext));
+  QTest::qWait(historyTimer->interval() + 200);
+  QCOMPARE(groupHistoryRequests, heldRequestCount);
+  respond(heldHistory, groupHistory, "200 OK");
+  heldHistory.clear();
+
+  QTRY_COMPARE(view->toPlainText().count(plaintext), 1);
+  QTRY_VERIFY_WITH_TIMEOUT(groupHistoryRequests > heldRequestCount, 4500);
+  // Wait for a following request so the previous duplicate response was applied.
+  holdNextHistory = true;
+  QTRY_VERIFY_WITH_TIMEOUT(heldHistory, 4500);
+  QCOMPARE(view->toPlainText().count(plaintext), 1);
+  QVERIFY(!passphrasePromptShown);
+
+  // Refresh must check the peer while an old history reply is still in flight.
+  auto* reload = window.findChild<QPushButton*>("reloadConversationsButton");
+  auto* trustLabel = window.findChild<QLabel*>("peerTrustLabel");
+  QVERIFY(reload && trustLabel);
+  QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(peer.publicKey)));
+  offeredKey = replacement.publicKey;
+  reload->click();
+  QVERIFY(!send->isEnabled());
+  QVERIFY(!historyTimer->isActive());
+  QTRY_VERIFY(trustLabel->text().contains("peer key changed"));
+  QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(peer.publicKey)));
+  QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(offeredKey)));
+  auto staleMessage = message;
+  staleMessage.insert("message_id", "stale-history");
+  const auto staleHistory = QJsonDocument(
+      QJsonObject{{"messages", QJsonArray{staleMessage}}}).toJson();
+  respond(heldHistory, staleHistory, "200 OK");
+  QTRY_VERIFY(heldHistory.isNull());
+  const int blockedCount = groupHistoryRequests;
+  QTest::qWait(historyTimer->interval() + 200);
+  QCOMPARE(groupHistoryRequests, blockedCount);
+  QCOMPARE(view->toPlainText().count(plaintext), 1);
+  QVERIFY(trustLabel->text().contains("peer key changed"));
+
+  // The original key under a different UUID must also be rejected.
+  offeredKey = peer.publicKey;
+  offeredPeer = otherPeerId;
+  QTRY_VERIFY(reload->isEnabled());
+  reload->click();
+  QTRY_VERIFY(trustLabel->text().contains("conversation peer changed"));
+  QVERIFY(trustLabel->text().contains(peerId));
+  QVERIFY(trustLabel->text().contains(otherPeerId));
+  QVERIFY(!historyTimer->isActive());
+
+  offeredPeer = peerId;
+  QTRY_VERIFY(reload->isEnabled());
+  holdNextHistory = true;
+  reload->click();
+  QTRY_VERIFY(send->isEnabled());
+  QTRY_VERIFY(heldHistory);
+  QVERIFY(historyTimer->isActive());
+  QVERIFY(!trustLabel->text().contains("blocked"));
+  QVERIFY(!passphrasePromptShown);
+
+  // A reply from the previous session must not repopulate the cleared chat.
+  rejectRefresh = true;
+  QVERIFY(QMetaObject::invokeMethod(&window, "refreshAccessToken"));
+  QTRY_VERIFY(!historyTimer->isActive());
+  QCOMPARE(list->count(), 0);
+  respond(heldHistory, groupHistory, "200 OK");
+  const int requestsAfterReset = groupHistoryRequests;
+  QTest::qWait(historyTimer->interval() + 200);
+  QCOMPARE(groupHistoryRequests, requestsAfterReset);
+  QVERIFY(view->toPlainText().isEmpty());
 }
 
 void TestMainWindow::listingRejectsInvalidResponses_data() {

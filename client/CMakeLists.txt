@@ -62,6 +62,7 @@ add_library(securechat_crypto
     src/crypto/MessageCrypto.cpp
     src/crypto/MessageSerializer.cpp
     src/crypto/IdentityKeyStore.cpp
+    src/crypto/PeerTrustStore.cpp
 )
 
 set_target_properties(securechat_crypto PROPERTIES
@@ -424,3 +425,6 @@ add_test(
     NAME IdentityKeyStoreTests
     COMMAND test_IdentityKeyStore
 )
+add_executable(test_PeerTrustStore tests/crypto/test_PeerTrustStore.cpp)
+target_link_libraries(test_PeerTrustStore PRIVATE securechat_crypto Qt6::Test)
+add_test(NAME PeerTrustStoreTests COMMAND test_PeerTrustStore)

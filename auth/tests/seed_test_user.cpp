@@ -11,7 +11,7 @@
 #include "auth/domain/User.hpp"
 #include "auth/repositories/PostgresUserRepository.hpp"
 
-int main() {
+int main(int argc, char** argv) {
   try {
     if (sodium_init() < 0) {
       throw std::runtime_error("Failed to initialize libsodium");
@@ -31,8 +31,10 @@ int main() {
 
     auth::domain::User user{};
 
-    user.username = "alice_test";
-    user.email = "alice.test@example.com";
+    user.username = argc > 1 ? argv[1] : "alice_test";
+    if (user.username != "alice_test" && user.username != "bob_test")
+      throw std::runtime_error("Expected alice_test or bob_test");
+    user.email = user.username == "alice_test" ? "alice.test@example.com" : "bob.test@example.com";
 
     // Never store plaintext passwords.
     user.password_hash =

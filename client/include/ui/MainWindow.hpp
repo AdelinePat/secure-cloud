@@ -1,9 +1,10 @@
 #pragma once
 
 #include <QHash>
+#include <QLabel>
+#include <optional>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QLabel>
 #include <QMainWindow>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -49,7 +50,14 @@ class MainWindow : public QMainWindow {
   void loadConversations();
   void addConversation(const QString& id, const QString& name, bool select);
   void resetConversations();
+  void requestActiveHistory();
+  void applyHistory(const QString& conversationId, const QByteArray& response,
+                    int httpStatus);
   void refreshMessages();
+  QTimer* historyTimer_;
+  quint64 selectionGeneration_ = 0;
+  bool historyPending_ = false;
+  bool peerKeyPending_ = false;
   void updateMessageStatus(const QString& messageId, MessageStatus status);
   network::MessageService messageService_;
   network::ConversationService conversationService_;
@@ -57,7 +65,15 @@ class MainWindow : public QMainWindow {
   QLineEdit* conversationParticipantsInput_;
   QPushButton* createConversationButton_;
   QString currentConversationId_;
-  crypto::SessionKey testSessionKey_{};
+  std::optional<crypto::KeyPair> identityKeyPair_;
+  struct ConversationKeys { QString peerId; crypto::SessionKeys keys; };
+  QHash<QString, ConversationKeys> conversationKeys_;
+  void loadPeerKey(const QString& conversationId, bool revalidate = false);
+  void clearConversationKeys(const QString& id);
+  void clearCrypto();
+  QLabel* localFingerprintLabel_;
+  QLabel* peerTrustLabel_;
+  QHash<QString, QString> peerTrustDetails_;
   network::HttpClient& httpClient_;
   QLineEdit* usernameInput_;
   QLineEdit* passwordInput_;

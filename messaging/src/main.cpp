@@ -146,6 +146,70 @@ int main() {
         response.result(http::status::ok);
         response.body() = R"({"status":"ok","service":"messaging"})";
 
+      } else if ((request.method() == http::verb::put &&
+                  request.target() == "/identity-key") ||
+                 (request.method() == http::verb::get &&
+                  std::regex_match(std::string(request.target()),
+                    std::regex(R"(^/conversations/[0-9a-fA-F-]{36}/peer-key$)")))) {
+        const std::string authorization(request[http::field::authorization]);
+        const auto subject = authorization.starts_with("Bearer ")
+            ? jwtVerifier.verify(authorization.substr(7)) : std::nullopt;
+        if (!subject) {
+          response.result(http::status::unauthorized);
+          response.body() = R"({"error":"UNAUTHORIZED"})";
+        } else try {
+          if (request.method() == http::verb::put) {
+            const auto body = nlohmann::json::parse(request.body(), nullptr, false);
+            const auto key = body.is_object() && body.contains("public_key") &&
+                body["public_key"].is_string()
+                ? body["public_key"].get<std::string>() : std::string{};
+            const auto decoded = decodeBase64(key, crypto_kx_PUBLICKEYBYTES);
+            if (!decoded || decoded->size() != crypto_kx_PUBLICKEYBYTES ||
+                encodeBase64(*decoded) != key) {
+              response.result(http::status::bad_request);
+              response.body() = R"({"error":"INVALID_PUBLIC_KEY"})";
+            } else {
+              // First publication is immutable; identical retries are safe.
+              pqxx::work txn(dbConnection);
+              const auto rows = txn.exec_params(
+                  "UPDATE users SET public_key=$1 WHERE id=$2 "
+                  "AND (public_key='' OR public_key=$1)", key, *subject);
+              const bool stored = rows.affected_rows() == 1;
+              txn.commit();
+              response.result(stored ? http::status::ok : http::status::conflict);
+              response.body() = stored ? R"({"status":"ok"})" : R"({"error":"KEY_CONFLICT"})";
+            }
+          } else {
+            const auto id = std::string(request.target()).substr(15, 36);
+            const auto conversation = conversationRepository.findById(id);
+            if (!conversation || !conversationRepository.findRole(id, *subject)) {
+              response.result(http::status::forbidden);
+              response.body() = R"({"error":"FORBIDDEN"})";
+            } else if (conversation->participants.size() != 2) {
+              response.result(http::status::conflict);
+              response.body() = R"({"error":"TWO_PARTICIPANTS_REQUIRED"})";
+            } else {
+              const auto& members = conversation->participants;
+              const auto peer = members[0].user_id == *subject ? members[1].user_id : members[0].user_id;
+              pqxx::work txn(dbConnection);
+              const auto rows = txn.exec_params("SELECT public_key FROM users WHERE id=$1", peer);
+              const auto key = rows.empty() ? std::string{} : rows[0][0].as<std::string>();
+              txn.commit();
+              const auto decoded = decodeBase64(key, crypto_kx_PUBLICKEYBYTES);
+              if (!decoded || decoded->size() != crypto_kx_PUBLICKEYBYTES) {
+                response.result(http::status::conflict);
+                response.body() = R"({"error":"PEER_KEY_UNAVAILABLE"})";
+              } else {
+                response.result(http::status::ok);
+                response.body() = nlohmann::json{{"user_id",peer},{"public_key",key}}.dump();
+              }
+            }
+          }
+        } catch (const std::exception& e) {
+          std::cerr << "Identity endpoint failed: " << e.what() << '\n';
+          response.result(http::status::internal_server_error);
+          response.body() = R"({"error":"INTERNAL_ERROR"})";
+        }
       } else if (request.method() == http::verb::post &&
                  request.target() == "/conversations") {
         // Extract the Bearer token.
@@ -381,7 +445,7 @@ int main() {
                   body["ciphertext"].is_string() &&
                   body.contains("encryption_version") &&
                   body["encryption_version"].is_number_integer() &&
-                  body["encryption_version"] == 1;
+                  (body["encryption_version"] == 1 || body["encryption_version"] == 2);
 
               if (!validBody) {
                 response.result(http::status::bad_request);
@@ -419,7 +483,7 @@ int main() {
                   message.user_id = *subject;
                   message.ciphertext = *ciphertext;
                   message.nonce = nonceBase64;
-                  message.encryption_version = 1;
+                  message.encryption_version = body["encryption_version"].get<int>();
 
                   const auto stored = messageRepository.create(message);
 
