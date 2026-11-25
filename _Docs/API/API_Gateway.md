@@ -40,13 +40,20 @@
 
 ## Files
 
-`POST /secureChat/files` (protected) >> Files API POST /files
+Implemented: the gateway forwards `/files` and `/files/...` unchanged to the
+file service (body limit 2 MiB on these routes). See [File API](./File_API.md).
 
-`GET /secureChat/files/{id}` (protected) >> File API GET /files/{id}
+`POST /files` (protected) >> File API POST /files
 
-`GET /secureChat/files/{id}/content` (protected) >> File API GET /files/{id}/content
+`PUT /files/{id}/chunks/{n}` (protected) >> File API PUT /files/{id}/chunks/{n}
 
-`DELETE /secureChat/files/{id}` (protected) >> File API DELETE /files/{id}
+`GET /files/{id}` (protected) >> File API GET /files/{id}
+
+`POST /files/{id}/complete` (protected) >> File API POST /files/{id}/complete
+
+`GET /files/{id}/chunks/{n}` (protected) >> File API GET /files/{id}/chunks/{n}
+
+`DELETE /files/{id}` (protected) >> File API DELETE /files/{id}
 
 ## Inter MS, not in api gateway?
 

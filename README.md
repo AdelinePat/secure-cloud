@@ -316,13 +316,14 @@ only on first container start (empty volume). All files below must be mounted
 into that same directory with names that sort in this exact order — later
 files reference tables created by earlier ones:
 
-1. `auth/db/migrations/0001_init.sql`   → creates users, sessions
-2. `file/db/migrations/0001_init.sql`   → creates files (FK → users)
-3. `messaging/db/migrations/0001_init.sql` → creates conversations, participants,
+1. `auth/db/0001_auth_init.sql` → creates users, sessions
+2. `messaging/db/0001_messaging_init.sql` → creates conversations, participants,
    messages, message_attachments (FK → users; message_attachments.file_id is
    intentionally NOT a DB-level FK to files — file and messaging are separate
    services, so that link is validated at the application layer, not the DB)
-4. `auth/db/seed.sql`   → alice/bob/charlie test users
+3. `file/db/0001_file_init.sql` → creates files, file_chunks (FK → users and
+   conversations, so it must run after messaging)
+4. `auth/db/auth_seed.sql` → alice/bob/charlie test users
 5. (add messaging/file seed files here if/when needed)
 
 To re-seed after a schema change: `docker compose down -v && docker compose up`
