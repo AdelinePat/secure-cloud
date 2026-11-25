@@ -32,9 +32,16 @@ int main(int argc, char** argv) {
     auth::domain::User user{};
 
     user.username = argc > 1 ? argv[1] : "alice_test";
-    if (user.username != "alice_test" && user.username != "bob_test")
-      throw std::runtime_error("Expected alice_test or bob_test");
-    user.email = user.username == "alice_test" ? "alice.test@example.com" : "bob.test@example.com";
+    if (user.username != "alice_test" && user.username != "bob_test" &&
+        user.username != "charlie_test")
+      throw std::runtime_error("Expected alice_test, bob_test or charlie_test");
+    if (user.username == "alice_test") {
+      user.email = "alice.test@example.com";
+    } else if (user.username == "bob_test") {
+      user.email = "bob.test@example.com";
+    } else {
+      user.email = "charlie.test@example.com";
+    }
 
     // Never store plaintext passwords.
     user.password_hash =

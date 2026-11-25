@@ -69,6 +69,10 @@ domain::Message PostgresMessageRepository::create(
 MessagePage PostgresMessageRepository::history(
     const std::string& conversationId, std::optional<std::string> before,
     int limit) {
+  if (limit < 1 || limit > 100) {
+    throw std::invalid_argument("Message history limit must be between 1 and 100");
+  }
+
   pqxx::work txn(conn_);
 
   std::optional<std::string> beforeTimestamp;
@@ -127,7 +131,8 @@ MessagePage PostgresMessageRepository::history(
 
   // Only offer a next page if we got a full page — a short page means we hit
   // the end of history.
-  if (static_cast<int>(page.messages.size()) == limit) {
+  if (!page.messages.empty() &&
+      page.messages.size() == static_cast<std::size_t>(limit)) {
     const auto& lastMessage = page.messages.back();
 
     page.nextCursor = lastMessage.server_timestamp + "|" + lastMessage.id;

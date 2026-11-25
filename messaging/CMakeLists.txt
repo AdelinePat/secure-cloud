@@ -37,6 +37,7 @@ if(MESSAGING_LIB_SOURCES)
 
     target_include_directories(messaging_lib PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../common/security/include
     )
 
     target_link_libraries(messaging_lib PUBLIC
@@ -93,6 +94,7 @@ if(MESSAGING_TEST_SOURCES)
 
     target_include_directories(messaging_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../common/security/tests
     )
 
     if(TARGET messaging_lib)
@@ -107,6 +109,10 @@ if(MESSAGING_TEST_SOURCES)
 
     target_compile_options(messaging_tests PRIVATE
         -Wall -Wextra -Wpedantic
+    )
+
+    target_compile_definitions(messaging_tests PRIVATE
+        SECURECHAT_TEST_KEYS="${CMAKE_CURRENT_SOURCE_DIR}/../auth/tests/fixtures"
     )
 
     add_test(NAME messaging_tests COMMAND messaging_tests)

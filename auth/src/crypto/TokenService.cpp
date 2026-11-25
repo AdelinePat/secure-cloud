@@ -1,5 +1,6 @@
-
 #include "auth/crypto/TokenService.hpp"
+
+#include "common/security/TokenFormat.hpp"
 
 #include <openssl/bn.h>
 #include <openssl/ecdsa.h>
@@ -92,12 +93,14 @@ std::string TokenService::base64UrlDecode(const std::string& encoded) {
   std::string decoded(encoded.size(), '\0');
 
   std::size_t decodedSize = 0;
+  const char* end = nullptr;
 
   // Decode using the URL-safe Base64 variant without padding.
   if (sodium_base642bin(reinterpret_cast<unsigned char*>(decoded.data()),
                         decoded.size(), encoded.data(), encoded.size(), nullptr,
-                        &decodedSize, nullptr,
-                        sodium_base64_VARIANT_URLSAFE_NO_PADDING) != 0) {
+                        &decodedSize, &end,
+                        sodium_base64_VARIANT_URLSAFE_NO_PADDING) != 0 ||
+      end != encoded.data() + encoded.size()) {
     throw std::runtime_error("Invalid Base64URL encoding");
   }
 
@@ -236,6 +239,7 @@ std::string TokenService::generateAccessToken(const JwtClaims& claims,
 
   // Build the JWT payload.
   nlohmann::json payload = {{"sub", claims.subject},
+                            {"aud", common::security::accessTokenAudience},
                             {"iss", claims.issuer},
                             {"jti", claims.tokenId},
                             {"iat", claims.issuedAt},
@@ -302,6 +306,10 @@ std::string TokenService::generateAccessToken(const JwtClaims& claims,
 
 bool TokenService::verifyAccessTokenSignature(const std::string& token,
                                               const JwtKeyManager& keyManager) {
+  if (token.size() > common::security::maxAccessTokenSize) {
+    return false;
+  }
+
   // Locate the JWT separators.
   const std::size_t firstDot = token.find('.');
 
@@ -337,6 +345,8 @@ bool TokenService::verifyAccessTokenSignature(const std::string& token,
   std::string joseSignature;
 
   try {
+    base64UrlDecode(encodedHeader);
+    base64UrlDecode(encodedPayload);
     joseSignature = base64UrlDecode(encodedSignature);
   } catch (const std::runtime_error&) {
     return false;
@@ -443,13 +453,18 @@ bool TokenService::validateAccessToken(const std::string& token,
 
     // Validate the subject.
     if (!payload.contains("sub") || !payload["sub"].is_string() ||
-        payload["sub"].get<std::string>().empty()) {
+        !common::security::isUuid(payload["sub"].get_ref<const std::string&>())) {
       return false;
     }
 
     // Validate the token issuer.
     if (!payload.contains("iss") || !payload["iss"].is_string() ||
         payload["iss"] != "securechat-auth") {
+      return false;
+    }
+
+    if (!payload.contains("aud") || !payload["aud"].is_string() ||
+        payload["aud"] != common::security::accessTokenAudience) {
       return false;
     }
 

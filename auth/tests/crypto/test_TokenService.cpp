@@ -4,9 +4,12 @@
 #include <chrono>
 #include <string>
 
+#include "SignedJwt.hpp"
 #include "auth/crypto/TokenService.hpp"
 
 namespace {
+
+constexpr char validSubject[] = "01234567-89ab-4def-8123-456789abcdef";
 
 class TokenServiceTest : public ::testing::Test {
  protected:
@@ -46,12 +49,12 @@ TEST_F(TokenServiceTest, HashIsDeterministic) {
 }
 
 TEST_F(TokenServiceTest, GeneratesThreeBase64UrlEncodedSegments) {
-  auth::crypto::JwtClaims claims{"user-123", "securechat-auth", "token-456",
+  auth::crypto::JwtClaims claims{validSubject, "securechat-auth", "token-456",
                                  1700000000, 1700000900};
 
   auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const std::string result =
       auth::crypto::TokenService::generateAccessToken(claims, keyManager);
@@ -94,13 +97,13 @@ TEST_F(TokenServiceTest, GeneratesThreeBase64UrlEncodedSegments) {
 
 TEST_F(TokenServiceTest, VerifiesValidAccessTokenSignature) {
   // Prepare the JWT claims.
-  auth::crypto::JwtClaims claims{"user-123", "securechat-auth", "token-456",
+  auth::crypto::JwtClaims claims{validSubject, "securechat-auth", "token-456",
                                  1700000000, 1700000900};
 
   // Load the test ES256 key pair.
   auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   // Generate a JWT signed with the private key.
   const std::string token =
@@ -112,12 +115,12 @@ TEST_F(TokenServiceTest, VerifiesValidAccessTokenSignature) {
 }
 
 TEST_F(TokenServiceTest, RejectsTamperedAccessToken) {
-  auth::crypto::JwtClaims claims{"user-123", "securechat-auth", "token-456",
+  auth::crypto::JwtClaims claims{validSubject, "securechat-auth", "token-456",
                                  1700000000, 1700000900};
 
   auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   // Generate a valid signed JWT.
   std::string token =
@@ -144,8 +147,8 @@ TEST_F(TokenServiceTest, RejectsTamperedAccessToken) {
 TEST_F(TokenServiceTest, AcceptsValidAccessToken) {
   // Load the test signing and verification keys.
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   // Retrieve the current Unix timestamp.
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
@@ -153,7 +156,7 @@ TEST_F(TokenServiceTest, AcceptsValidAccessToken) {
                        .count();
 
   // Create claims for a token valid for 15 minutes.
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now, now + 900};
 
   // Generate a signed JWT.
@@ -168,8 +171,8 @@ TEST_F(TokenServiceTest, AcceptsValidAccessToken) {
 TEST_F(TokenServiceTest, RejectsExpiredAccessToken) {
   // Load the test signing and verification keys.
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   // Retrieve the current Unix timestamp.
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
@@ -177,7 +180,7 @@ TEST_F(TokenServiceTest, RejectsExpiredAccessToken) {
                        .count();
 
   // Create a token that expired one minute ago.
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now - 960, now - 60};
 
   // Generate a correctly signed but expired JWT.
@@ -191,14 +194,14 @@ TEST_F(TokenServiceTest, RejectsExpiredAccessToken) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithInvalidIssuer) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "unknown-issuer",
+  const auth::crypto::JwtClaims claims{validSubject, "unknown-issuer",
                                        "token-123", now, now + 900};
 
   const std::string token =
@@ -214,8 +217,8 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithInvalidIssuer) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithEmptySubject) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
@@ -233,14 +236,14 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithEmptySubject) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithEmptyTokenId) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth", "", now,
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth", "", now,
                                        now + 900};
 
   const std::string token =
@@ -252,14 +255,14 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithEmptyTokenId) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenIssuedInFuture) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now + 3600, now + 4500};
 
   const std::string token =
@@ -271,14 +274,14 @@ TEST_F(TokenServiceTest, RejectsAccessTokenIssuedInFuture) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithExpirationBeforeIssuance) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now, now - 60};
 
   const std::string token =
@@ -290,14 +293,14 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithExpirationBeforeIssuance) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithEqualIssuanceAndExpiration) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now, now};
 
   const std::string token =
@@ -309,8 +312,8 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithEqualIssuanceAndExpiration) {
 
 TEST_F(TokenServiceTest, RejectsMalformedAccessToken) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   EXPECT_FALSE(auth::crypto::TokenService::validateAccessToken("", keyManager));
 
@@ -329,14 +332,14 @@ TEST_F(TokenServiceTest, RejectsMalformedAccessToken) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithInvalidBase64Signature) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now, now + 900};
 
   std::string token =
@@ -355,14 +358,14 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithInvalidBase64Signature) {
 
 TEST_F(TokenServiceTest, RejectsAccessTokenWithTruncatedSignature) {
   const auth::crypto::JwtKeyManager keyManager(
-      "/app/auth/tests/fixtures/test-private.pem",
-      "/app/auth/tests/fixtures/test-public.pem");
+      SECURECHAT_TEST_KEYS "/test-private.pem",
+      SECURECHAT_TEST_KEYS "/test-public.pem");
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
 
-  const auth::crypto::JwtClaims claims{"user-123", "securechat-auth",
+  const auth::crypto::JwtClaims claims{validSubject, "securechat-auth",
                                        "token-123", now, now + 900};
 
   std::string token =
@@ -374,6 +377,32 @@ TEST_F(TokenServiceTest, RejectsAccessTokenWithTruncatedSignature) {
 
   EXPECT_FALSE(
       auth::crypto::TokenService::validateAccessToken(token, keyManager));
+}
+
+}  // namespace
+
+namespace {
+
+TEST_F(TokenServiceTest, RejectsMissingOrIncorrectAudienceAndInvalidSubject) {
+  const auth::crypto::JwtKeyManager keys(SECURECHAT_TEST_KEYS "/test-private.pem",
+                                        SECURECHAT_TEST_KEYS "/test-public.pem");
+  auto claims = test_jwt::claims();
+  std::string token;
+  ASSERT_NO_FATAL_FAILURE(test_jwt::sign(claims, token));
+  ASSERT_TRUE(auth::crypto::TokenService::validateAccessToken(token, keys));
+
+  claims.erase("aud");
+  ASSERT_NO_FATAL_FAILURE(test_jwt::sign(claims, token));
+  EXPECT_FALSE(auth::crypto::TokenService::validateAccessToken(token, keys));
+
+  claims["aud"] = "other";
+  ASSERT_NO_FATAL_FAILURE(test_jwt::sign(claims, token));
+  EXPECT_FALSE(auth::crypto::TokenService::validateAccessToken(token, keys));
+
+  claims["aud"] = "securechat-api";
+  claims["sub"] = "user-123";
+  ASSERT_NO_FATAL_FAILURE(test_jwt::sign(claims, token));
+  EXPECT_FALSE(auth::crypto::TokenService::validateAccessToken(token, keys));
 }
 
 }  // namespace

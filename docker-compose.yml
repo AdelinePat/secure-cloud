@@ -112,6 +112,10 @@ services:
         source: ./common
         target: /app/common
       - type: bind
+        source: ./auth/tests/fixtures
+        target: /app/auth/tests/fixtures
+        read_only: true
+      - type: bind
         source: ./messaging
         target: /app/messaging
       - type: bind
