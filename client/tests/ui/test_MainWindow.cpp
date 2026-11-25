@@ -14,10 +14,13 @@
 #include <QStatusBar>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTextBlock>
+#include <QTextDocument>
 #include <QtTest/QtTest>
 #include <algorithm>
 #include <memory>
 
+#include "network/FileMessage.hpp"
 #include "ui/MainWindow.hpp"
 
 class TestMainWindow : public QObject {
@@ -231,7 +234,28 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
                             {"encryption_version", 2},
                             {"nonce", encode(encrypted.nonce)},
                             {"ciphertext", encode(encrypted.ciphertext)}};
-  groupHistory = QJsonDocument(QJsonObject{{"messages", QJsonArray{message}}}).toJson();
+  // File messages (version 3) carry FileMessage JSON; the same JSON sent as
+  // a text message (version 2) must stay text.
+  network::FileMessage sharedFile;
+  sharedFile.fileId = "3bae935a-a384-4e10-bfd6-21295d82cac3";
+  sharedFile.name = "../../evil.sh";
+  sharedFile.size = 2048;
+  sharedFile.text = "the caption";
+  const auto peerMessage = [&](const QString& id, int version,
+                               const QByteArray& body) {
+    const auto sealed = crypto::MessageCrypto::encrypt(body.toStdString(), conversationTx);
+    return QJsonObject{{"message_id", id},
+                       {"user_id", peerId},
+                       {"encryption_version", version},
+                       {"nonce", encode(sealed.nonce)},
+                       {"ciphertext", encode(sealed.ciphertext)}};
+  };
+  const QByteArray fileJson = network::FileMessageCodec::serialize(sharedFile);
+  groupHistory = QJsonDocument(QJsonObject{
+      {"messages", QJsonArray{message,
+                              peerMessage("file-1", 3, fileJson),
+                              peerMessage("file-bad", 3, "not a file message"),
+                              peerMessage("text-json", 2, fileJson)}}}).toJson();
 
   holdNextHistory = true;
   QTRY_VERIFY_WITH_TIMEOUT(heldHistory, 4500);
@@ -243,6 +267,23 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   heldHistory.clear();
 
   QTRY_COMPARE(view->toPlainText().count(plaintext), 1);
+  const QString rendered = view->toPlainText();
+  QVERIFY(rendered.contains(QString::fromUtf8("Peer: \U0001F4CE evil.sh (2")));
+  QVERIFY(rendered.contains(QString::fromUtf8(" \u2014 the caption [Sent]")));
+  QVERIFY(!rendered.contains(QString::fromUtf8("\U0001F4CE ../")));
+  QVERIFY(rendered.contains("Peer: [Invalid file message]"));
+  QVERIFY(rendered.contains("Peer: " + QString::fromUtf8(fileJson)));
+  // Exactly one link, pointing at the valid file message.
+  QStringList anchors;
+  for (auto block = view->document()->begin(); block.isValid(); block = block.next()) {
+    for (auto it = block.begin(); !it.atEnd(); ++it) {
+      const auto format = it.fragment().charFormat();
+      if (format.isAnchor()) anchors.append(format.anchorHref());
+    }
+  }
+  QCOMPARE(anchors, QStringList{"securechat-file:file-1"});
+  auto* attach = window.findChild<QPushButton*>("attachButton");
+  QVERIFY(attach && attach->isEnabled() == send->isEnabled());
   QTRY_VERIFY_WITH_TIMEOUT(groupHistoryRequests > heldRequestCount, 4500);
   // Wait for a following request so the previous duplicate response was applied.
   holdNextHistory = true;

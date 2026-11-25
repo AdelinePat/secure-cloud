@@ -241,6 +241,11 @@ time it tries to download (WebSocket notifications are not implemented).
 To **resume** after a crash or a dropped connection: `GET /files/{id}`, then
 send only the chunks that are not in `received_chunks`, then `complete`.
 
+The Qt client (`client/src/network/FileService.cpp`) retries each request up
+to 3 times on network errors and 5xx answers, and deletes the file on the
+server if the upload fails. It does not resume after the client restarts: the
+encryption state of a stream is not saved, so the upload starts over.
+
 ### Download
 
 1. Decrypt the file message to get `file_id`, `key` and `header`.
@@ -248,7 +253,9 @@ send only the chunks that are not in `received_chunks`, then `complete`.
 3. `GET` chunks `0 … chunk_count-1` in order, decrypting each one as it
    arrives and writing the plaintext to disk.
 4. If a chunk fails to decrypt, or the last chunk does not carry the final
-   tag, **delete the partial file**: it was tampered with or truncated.
+   tag, **delete the partial file**: it was tampered with or truncated. (The
+   Qt client writes to a temporary file that only replaces the destination
+   once the whole file has been checked.)
 
 ### Encryption
 
@@ -284,11 +291,14 @@ conversation key like any text message. Its plaintext is JSON:
 }
 ```
 
+- It is sent with **`encryption_version: 3`**. Text messages use `2`, so a
+  text that happens to look like this JSON is still shown as text.
 - `size` is the **plaintext** size, for display.
-- `text` is an optional caption shown with the file.
-- The client needs a way to tell this JSON from a plain text message (for
-  example a new `encryption_version`, or making every message plaintext a
-  JSON object with a `kind`). This is decided with the client work.
+- `text` is an optional caption shown with the file. `mime` may be empty.
+- `name` comes from the sender: the client keeps only its last path
+  component (no `../`, no folders) before offering it in the save dialog.
+- The client checks that `size` matches the server's `chunk_count` and
+  `size_bytes` before downloading.
 
 ---
 

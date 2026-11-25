@@ -63,6 +63,7 @@ add_library(securechat_crypto
     src/crypto/MessageSerializer.cpp
     src/crypto/IdentityKeyStore.cpp
     src/crypto/PeerTrustStore.cpp
+    src/crypto/FileCrypto.cpp
 )
 
 set_target_properties(securechat_crypto PROPERTIES
@@ -110,6 +111,8 @@ add_library(securechat_network
     src/network/SendMessageResultMapper.cpp
     src/network/MessageService.cpp
     src/network/ConversationService.cpp
+    src/network/FileMessage.cpp
+    src/network/FileService.cpp
     src/ui/MessageStatusMapper.cpp
 
     include/ui/MessageStatusMapper.hpp
@@ -117,6 +120,7 @@ add_library(securechat_network
     include/network/MessageService.hpp
     include/network/ConversationService.hpp
     include/network/HttpClient.hpp
+    include/network/FileService.hpp
 )
 
 target_include_directories(securechat_network PUBLIC
@@ -428,3 +432,22 @@ add_test(
 add_executable(test_PeerTrustStore tests/crypto/test_PeerTrustStore.cpp)
 target_link_libraries(test_PeerTrustStore PRIVATE securechat_crypto Qt6::Test)
 add_test(NAME PeerTrustStoreTests COMMAND test_PeerTrustStore)
+
+# --------------------------------------------------
+# File encryption and transfer tests
+# --------------------------------------------------
+
+add_executable(test_FileCrypto tests/crypto/test_FileCrypto.cpp)
+target_link_libraries(test_FileCrypto PRIVATE securechat_crypto Qt6::Test)
+set_target_properties(test_FileCrypto PROPERTIES AUTOMOC ON)
+add_test(NAME FileCryptoTests COMMAND test_FileCrypto)
+
+add_executable(test_FileMessage tests/network/test_FileMessage.cpp)
+target_link_libraries(test_FileMessage PRIVATE securechat_network Qt6::Test)
+set_target_properties(test_FileMessage PROPERTIES AUTOMOC ON)
+add_test(NAME FileMessageTests COMMAND test_FileMessage)
+
+add_executable(test_FileService tests/network/test_FileService.cpp)
+target_link_libraries(test_FileService PRIVATE securechat_network Qt6::Test Qt6::Network)
+set_target_properties(test_FileService PROPERTIES AUTOMOC ON)
+add_test(NAME FileServiceTests COMMAND test_FileService)

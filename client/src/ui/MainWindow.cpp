@@ -1,6 +1,12 @@
 #include "ui/MainWindow.hpp"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QLocale>
+#include <QStandardPaths>
+#include <QTextCharFormat>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QTextCursor>
@@ -26,6 +32,7 @@
 #include <utility>
 
 #include "crypto/MessageCrypto.hpp"
+#include "network/FileMessage.hpp"
 #include "network/dto/SendMessageRequest.hpp"
 #include "ui/MessageStatusMapper.hpp"
 
@@ -35,6 +42,7 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
     : QMainWindow(parent),
       messageService_(httpClient.baseUrl(), this),
       conversationService_(httpClient.baseUrl(), this),
+      fileService_(httpClient.baseUrl(), [this] { return accessToken_; }, this),
       httpClient_(httpClient) {
   setWindowTitle("SecureChat");
   resize(900, 600);
@@ -86,8 +94,10 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   conversationLayout->addWidget(conversationParticipantsInput_);
   conversationLayout->addWidget(createConversationButton_);
 
-  messageView_ = new QTextEdit(chatPage_);
-  messageView_->setReadOnly(true);
+  messageView_ = new QTextBrowser(chatPage_);
+  messageView_->setObjectName("messageView");
+  // File links are handled by onMessageLinkClicked, never opened directly.
+  messageView_->setOpenLinks(false);
 
   messageInput_ = new QLineEdit(chatPage_);
   messageInput_->setObjectName("messageInput");
@@ -96,8 +106,14 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   sendButton_ = new QPushButton("Send", chatPage_);
   sendButton_->setObjectName("sendButton");
 
+  attachButton_ = new QPushButton("Attach file", chatPage_);
+  attachButton_->setObjectName("attachButton");
+  attachButton_->setToolTip(
+      "Encrypt and send a file. Text in the message box is sent as its caption.");
+
   QHBoxLayout* inputLayout = new QHBoxLayout();
   inputLayout->addWidget(messageInput_);
+  inputLayout->addWidget(attachButton_);
   inputLayout->addWidget(sendButton_);
 
   conversationList_ = new QListWidget(chatPage_);
@@ -141,7 +157,7 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
   QVBoxLayout* chatLayout = new QVBoxLayout(chatPage_);
   chatLayout->addLayout(conversationLayout);
   chatLayout->addWidget(splitter);
-  sendButton_->setEnabled(false);
+  setComposerEnabled(false);
   messageInput_->setEnabled(false);
 
   historyTimer_ = new QTimer(this);
@@ -169,7 +185,7 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
             messageInput_->setText(
                 conversationDrafts_.value(currentConversationId_));
 
-            sendButton_->setEnabled(false);
+            setComposerEnabled(false);
             messageInput_->setEnabled(current != nullptr);
 
             peerTrustLabel_->setText(peerTrustDetails_.value(currentConversationId_));
@@ -205,6 +221,11 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
           &MainWindow::refreshAccessToken);
 
   connect(sendButton_, &QPushButton::clicked, this, &MainWindow::onSendClicked);
+  connect(attachButton_, &QPushButton::clicked, this,
+          &MainWindow::onAttachClicked);
+  connect(messageView_, &QTextBrowser::anchorClicked, this,
+          &MainWindow::onMessageLinkClicked);
+  connectFileTransfers();
 
   connect(messageInput_, &QLineEdit::returnPressed, this,
           &MainWindow::onSendClicked);
@@ -532,6 +553,8 @@ void MainWindow::resetConversations() {
   ++sessionGeneration_;
   ++selectionGeneration_;
   peerKeyPending_ = false;
+  fileService_.cancelAll();
+  transferLabels_.clear();
   clearCrypto();
   currentUserId_.clear();
   currentConversationId_.clear();
@@ -628,46 +651,149 @@ void MainWindow::onSendClicked() {
     return;
   }
 
-  // Generate a unique identifier for the message
-  QString messageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  ChatMessage chatMessage;
+  chatMessage.text = message;
+  messageInput_->clear();
+  sendEncrypted(currentConversationId_, chatMessage, message.toUtf8(),
+                network::kTextMessageVersion);
+}
 
-  // Create the UI message model
-  ChatMessage chatMessage{messageId, message, MessageStatus::Sending};
+void MainWindow::sendEncrypted(const QString& conversationId,
+                               ChatMessage chatMessage, QByteArray plaintext,
+                               int encryptionVersion) {
+  // Generate a unique identifier for the message
+  const QString messageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  chatMessage.id = messageId;
+  chatMessage.status = MessageStatus::Sending;
   chatMessage.senderId = currentUserId_;
+  chatMessage.encryptionVersion = encryptionVersion;
 
   // Store the message and preserve its display order
   messages_.insert(messageId, chatMessage);
-  conversationMessageOrder_[currentConversationId_].append(messageId);
+  conversationMessageOrder_[conversationId].append(messageId);
 
   // Refresh the conversation display
   refreshMessages();
 
-  messageInput_->clear();
-
   try {
+    const auto keys = conversationKeys_.constFind(conversationId);
+    if (keys == conversationKeys_.cend()) {
+      throw std::runtime_error("Conversation key unavailable");
+    }
+
     // Encrypt the message before sending it to the network layer
-    crypto::EncryptedMessage encryptedMessage =
-        crypto::MessageCrypto::encrypt(message.toUtf8().toStdString(), conversationKeys_.value(currentConversationId_).keys.tx);
+    crypto::EncryptedMessage encryptedMessage = crypto::MessageCrypto::encrypt(
+        plaintext.toStdString(), keys->keys.tx);
+    // A file message's plaintext holds the file key.
+    sodium_memzero(plaintext.data(), plaintext.size());
 
     // Build the encrypted message request
     network::dto::SendMessageRequest request;
 
     request.messageId = messageId.toStdString();
     request.encryptedMessage = std::move(encryptedMessage);
-    request.encryptionVersion = 2;
+    request.encryptionVersion = encryptionVersion;
     request.clientTimestamp = QDateTime::currentDateTimeUtc()
                                   .toString(Qt::ISODateWithMs)
                                   .toStdString();
 
     // Send the encrypted message asynchronously through the Gateway
-    messageService_.sendMessage(currentConversationId_, accessToken_, request);
+    messageService_.sendMessage(conversationId, accessToken_, request);
 
   } catch (const std::exception& e) {
+    sodium_memzero(plaintext.data(), plaintext.size());
     // Update the message status to indicate failure
     updateMessageStatus(messageId, MessageStatus::Failed);
     qWarning() << "Message sending failed:" << e.what();
+  }
+}
+
+void MainWindow::setComposerEnabled(bool enabled) {
+  sendButton_->setEnabled(enabled);
+  attachButton_->setEnabled(enabled);
+}
+
+void MainWindow::onAttachClicked() {
+  if (currentConversationId_.isEmpty() || accessToken_.isEmpty() ||
+      !attachButton_->isEnabled() ||
+      !conversationKeys_.contains(currentConversationId_)) {
     return;
   }
+  const QString path = QFileDialog::getOpenFileName(this, "Send a file");
+  if (path.isEmpty()) return;
+
+  // Text typed in the message box goes with the file as its caption.
+  const QString caption = messageInput_->text().trimmed();
+  messageInput_->clear();
+
+  const QString transferId =
+      fileService_.upload(currentConversationId_, path, caption);
+  transferLabels_.insert(transferId,
+                         "Uploading " + QFileInfo(path).fileName());
+  statusBar()->showMessage(transferLabels_.value(transferId) + "...");
+}
+
+void MainWindow::onMessageLinkClicked(const QUrl& url) {
+  if (url.scheme() != "securechat-file" || accessToken_.isEmpty()) return;
+  const auto message = messages_.constFind(url.path());
+  if (message == messages_.cend() || !message->file) return;
+  const network::FileMessage& file = *message->file;
+
+  // The name comes from the sender: strip any path before offering it.
+  const QString name = network::safeFileName(file.name);
+  const QString directory =
+      QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+  const QString path = QFileDialog::getSaveFileName(
+      this, "Save file", QDir(directory).filePath(name));
+  if (path.isEmpty()) return;
+
+  const QString transferId = fileService_.download(file, path);
+  transferLabels_.insert(transferId, "Downloading " + name);
+  statusBar()->showMessage(transferLabels_.value(transferId) + "...");
+}
+
+void MainWindow::connectFileTransfers() {
+  connect(&fileService_, &network::FileService::progress, this,
+          [this](const QString& id, qint64 done, qint64 total) {
+            if (!transferLabels_.contains(id)) return;
+            const qint64 percent = total > 0 ? done * 100 / total : 100;
+            statusBar()->showMessage(
+                QString("%1: %2%").arg(transferLabels_.value(id)).arg(percent));
+          });
+
+  connect(&fileService_, &network::FileService::uploadFinished, this,
+          [this](const QString& id, const QString& conversationId,
+                 const network::FileMessage& file) {
+            if (!transferLabels_.remove(id)) return;
+            if (!conversationKeys_.contains(conversationId)) {
+              // Keys are cleared while the peer identity is re-checked.
+              statusBar()->showMessage(
+                  "File uploaded but not shared: conversation key unavailable");
+              return;
+            }
+            ChatMessage chatMessage;
+            chatMessage.text = file.text;
+            chatMessage.file = file;
+            sendEncrypted(conversationId, chatMessage,
+                          network::FileMessageCodec::serialize(file),
+                          network::kFileMessageVersion);
+            statusBar()->showMessage("Sent " + network::safeFileName(file.name),
+                                     5000);
+          });
+
+  connect(&fileService_, &network::FileService::downloadFinished, this,
+          [this](const QString& id, const QString& path) {
+            if (!transferLabels_.remove(id)) return;
+            statusBar()->showMessage("Saved " + path, 10000);
+          });
+
+  connect(&fileService_, &network::FileService::transferFailed, this,
+          [this](const QString& id, const QString& error) {
+            const QString label = transferLabels_.take(id);
+            if (label.isEmpty()) return;
+            qWarning() << label << "failed:" << error;
+            statusBar()->showMessage(label + " failed: " + error);
+          });
 }
 
 void MainWindow::clearCrypto() {
@@ -695,7 +821,7 @@ void MainWindow::loadPeerKey(const QString& id, bool revalidate) {
   ++selectionGeneration_;
   clearConversationKeys(id);
   peerKeyPending_ = true;
-  sendButton_->setEnabled(false);
+  setComposerEnabled(false);
   if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
     peerTrustLabel_->setText("Checking peer identity...");
   }
@@ -752,7 +878,7 @@ void MainWindow::loadPeerKey(const QString& id, bool revalidate) {
           .arg(peer, trust.expectedFingerprint);
       peerTrustDetails_.insert(id, details);
       peerTrustLabel_->setText(details);
-      sendButton_->setEnabled(true);
+      setComposerEnabled(true);
       historyTimer_->start();
       requestActiveHistory();
     } catch (const std::exception& e) {
@@ -870,7 +996,10 @@ void MainWindow::applyHistory(const QString& conversationId,
     chatMessage.encryptionVersion =
         message.value("encryption_version").toInt(1);
     const auto keys = conversationKeys_.constFind(conversationId);
-    if (chatMessage.encryptionVersion == 2 && keys != conversationKeys_.cend() &&
+    const bool knownVersion =
+        chatMessage.encryptionVersion == network::kTextMessageVersion ||
+        chatMessage.encryptionVersion == network::kFileMessageVersion;
+    if (knownVersion && keys != conversationKeys_.cend() &&
         (senderId == currentUserId_ || senderId == keys->peerId)) {
       try {
         const auto n = QByteArray::fromBase64(nonce.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
@@ -880,9 +1009,17 @@ void MainWindow::applyHistory(const QString& conversationId,
         crypto::EncryptedMessage encrypted;
         std::copy(n.begin(), n.end(), encrypted.nonce.begin());
         encrypted.ciphertext.assign(c.begin(), c.end());
-        const auto plain = crypto::MessageCrypto::decrypt(encrypted,
+        auto plain = crypto::MessageCrypto::decrypt(encrypted,
             senderId == currentUserId_ ? keys->keys.tx : keys->keys.rx);
-        chatMessage.text = QString::fromUtf8(plain.data(), plain.size());
+        if (chatMessage.encryptionVersion == network::kFileMessageVersion) {
+          chatMessage.file = network::FileMessageCodec::parse(
+              QByteArray::fromStdString(plain));
+          chatMessage.text = chatMessage.file ? chatMessage.file->text
+                                              : "[Invalid file message]";
+        } else {
+          chatMessage.text = QString::fromUtf8(plain.data(), plain.size());
+        }
+        sodium_memzero(plain.data(), plain.size());
       } catch (const std::exception&) {
         chatMessage.text = "[Unable to decrypt]";
       }
@@ -938,8 +1075,28 @@ void MainWindow::refreshMessages() {
     // Render untrusted plaintext as text, never as HTML.
     auto cursor = messageView_->textCursor();
     cursor.movePosition(QTextCursor::End);
-    cursor.insertText((message.senderId == currentUserId_ ? "You: " : "Peer: ") +
-                      message.text + " [" + statusText + "]\n");
+    const QTextCharFormat plain;
+    cursor.insertText(message.senderId == currentUserId_ ? "You: " : "Peer: ",
+                      plain);
+    if (message.file) {
+      // A link to this message; clicking it offers to download the file.
+      QTextCharFormat link;
+      link.setAnchor(true);
+      link.setAnchorHref("securechat-file:" + messageId);
+      link.setFontUnderline(true);
+      link.setForeground(palette().link());
+      cursor.insertText(
+          QString::fromUtf8("\U0001F4CE %1 (%2)")
+              .arg(network::safeFileName(message.file->name),
+                   QLocale().formattedDataSize(message.file->size)),
+          link);
+      if (!message.text.isEmpty()) {
+        cursor.insertText(QString::fromUtf8(" \u2014 ") + message.text, plain);
+      }
+    } else {
+      cursor.insertText(message.text, plain);
+    }
+    cursor.insertText(" [" + statusText + "]\n", plain);
   }
 }
 

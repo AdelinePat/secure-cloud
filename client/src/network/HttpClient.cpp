@@ -129,4 +129,64 @@ QNetworkReply* HttpClient::getPeerKey(const QString& jwt, const QString& convers
   return networkManager_.get(request);
 }
 
+// ── File API ────────────────────────────────────────────────────────────────
+
+namespace {
+// A chunk is at most 1 MiB; a stalled transfer fails instead of hanging.
+constexpr int kFileTransferTimeoutMs = 60 * 1000;
+}  // namespace
+
+QNetworkRequest HttpClient::fileRequest(const QString& jwt,
+                                        const QString& path) const {
+  QUrl url = baseUrl_;
+  url.setPath(path);
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+  request.setTransferTimeout(kFileTransferTimeoutMs);
+  return request;
+}
+
+QNetworkReply* HttpClient::createFile(const QString& jwt,
+                                      const QString& conversationId,
+                                      qint64 sizeBytes, qint64 chunkCount) {
+  auto request = fileRequest(jwt, "/files");
+  request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  const QJsonObject json{{"conversation_id", conversationId},
+                         {"size_bytes", sizeBytes},
+                         {"chunk_count", chunkCount}};
+  return networkManager_.post(request,
+                              QJsonDocument(json).toJson(QJsonDocument::Compact));
+}
+
+QNetworkReply* HttpClient::uploadChunk(const QString& jwt, const QString& fileId,
+                                       qint64 index,
+                                       const QByteArray& ciphertext) {
+  auto request = fileRequest(
+      jwt, "/files/" + fileId + "/chunks/" + QString::number(index));
+  request.setHeader(QNetworkRequest::ContentTypeHeader,
+                    "application/octet-stream");
+  return networkManager_.put(request, ciphertext);
+}
+
+QNetworkReply* HttpClient::completeFile(const QString& jwt,
+                                        const QString& fileId) {
+  return networkManager_.post(fileRequest(jwt, "/files/" + fileId + "/complete"),
+                              QByteArray());
+}
+
+QNetworkReply* HttpClient::getFile(const QString& jwt, const QString& fileId) {
+  return networkManager_.get(fileRequest(jwt, "/files/" + fileId));
+}
+
+QNetworkReply* HttpClient::downloadChunk(const QString& jwt,
+                                         const QString& fileId, qint64 index) {
+  return networkManager_.get(fileRequest(
+      jwt, "/files/" + fileId + "/chunks/" + QString::number(index)));
+}
+
+QNetworkReply* HttpClient::deleteFile(const QString& jwt,
+                                      const QString& fileId) {
+  return networkManager_.deleteResource(fileRequest(jwt, "/files/" + fileId));
+}
+
 }  // namespace network

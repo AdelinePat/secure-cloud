@@ -36,7 +36,20 @@ class HttpClient : public QObject {
   QNetworkReply* createConversation(const QString& jwt, const QString& name,
                                     const QStringList& participants);
 
+  // File API (see _Docs/API/File_API.md). Bodies are ciphertext only.
+  QNetworkReply* createFile(const QString& jwt, const QString& conversationId,
+                            qint64 sizeBytes, qint64 chunkCount);
+  QNetworkReply* uploadChunk(const QString& jwt, const QString& fileId,
+                             qint64 index, const QByteArray& ciphertext);
+  QNetworkReply* completeFile(const QString& jwt, const QString& fileId);
+  QNetworkReply* getFile(const QString& jwt, const QString& fileId);
+  QNetworkReply* downloadChunk(const QString& jwt, const QString& fileId,
+                               qint64 index);
+  QNetworkReply* deleteFile(const QString& jwt, const QString& fileId);
+
  private:
+  QNetworkRequest fileRequest(const QString& jwt, const QString& path) const;
+
   QUrl baseUrl_;
   QNetworkAccessManager networkManager_;
 };

@@ -261,6 +261,19 @@ Request: same body as `message.send`, minus the `"type"` field.
 }
 ```
 
+`encryption_version` tells the recipient what the decrypted plaintext is
+(both use secretbox with the conversation key); any other value is
+`400 INVALID_MESSAGE`:
+
+| Value | Plaintext                                                              |
+| ----- | ---------------------------------------------------------------------- |
+| `1`   | legacy, not decrypted by the current client                            |
+| `2`   | UTF-8 text                                                             |
+| `3`   | a file message: JSON with the file id and key, see [File API](File_API.md#file-message) |
+
+`attachments` is ignored by the server: files are shared with a version `3`
+message instead.
+
 Response: 202 accepted/queued
 
 ```json

@@ -9,11 +9,12 @@
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QStringList>
-#include <QTextEdit>
+#include <QTextBrowser>
 #include <QTimer>
 
 #include "crypto/CryptoTypes.hpp"
 #include "network/ConversationService.hpp"
+#include "network/FileService.hpp"
 #include "network/HttpClient.hpp"
 #include "network/MessageService.hpp"
 #include "ui/ChatMessage.hpp"
@@ -31,12 +32,15 @@ class MainWindow : public QMainWindow {
   void onSendClicked();
   void onLoginClicked();
   void onCreateConversationClicked();
+  void onAttachClicked();
+  void onMessageLinkClicked(const QUrl& url);
   void refreshAccessToken();
 
  private:
-  QTextEdit* messageView_;
+  QTextBrowser* messageView_;
   QLineEdit* messageInput_;
   QPushButton* sendButton_;
+  QPushButton* attachButton_;
   QHash<QString, ChatMessage> messages_;
   QHash<QString, QStringList> conversationMessageOrder_;
   QHash<QString, QString> conversationDrafts_;
@@ -61,6 +65,14 @@ class MainWindow : public QMainWindow {
   void updateMessageStatus(const QString& messageId, MessageStatus status);
   network::MessageService messageService_;
   network::ConversationService conversationService_;
+  network::FileService fileService_;
+  QHash<QString, QString> transferLabels_;  // transfer id -> "Uploading x"
+  void setComposerEnabled(bool enabled);
+  // Encrypts `plaintext` with the conversation key, shows `message` as
+  // sending and posts it.
+  void sendEncrypted(const QString& conversationId, ChatMessage message,
+                     QByteArray plaintext, int encryptionVersion);
+  void connectFileTransfers();
   QLineEdit* conversationNameInput_;
   QLineEdit* conversationParticipantsInput_;
   QPushButton* createConversationButton_;

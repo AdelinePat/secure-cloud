@@ -445,7 +445,8 @@ int main() {
                   body["ciphertext"].is_string() &&
                   body.contains("encryption_version") &&
                   body["encryption_version"].is_number_integer() &&
-                  (body["encryption_version"] == 1 || body["encryption_version"] == 2);
+                  body["encryption_version"] >= 1 &&
+                  body["encryption_version"] <= 3;  // 3: file message (see File_API.md)
 
               if (!validBody) {
                 response.result(http::status::bad_request);
