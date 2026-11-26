@@ -10,7 +10,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(OpenSSL REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(libpqxx REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost CONFIG REQUIRED COMPONENTS system)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -37,6 +37,7 @@ if(AUTH_LIB_SOURCES)
 
     target_include_directories(auth_lib PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../common/security/include
     )
 
     target_link_libraries(auth_lib PUBLIC
@@ -90,6 +91,7 @@ if(AUTH_TEST_SOURCES)
 
     target_include_directories(auth_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../common/security/tests
     )
 
     if(TARGET auth_lib)
@@ -104,6 +106,10 @@ if(AUTH_TEST_SOURCES)
 
     target_compile_options(auth_tests PRIVATE
         -Wall -Wextra -Wpedantic
+    )
+
+    target_compile_definitions(auth_tests PRIVATE
+        SECURECHAT_TEST_KEYS="${CMAKE_CURRENT_SOURCE_DIR}/../auth/tests/fixtures"
     )
 
     add_test(NAME auth_tests COMMAND auth_tests)

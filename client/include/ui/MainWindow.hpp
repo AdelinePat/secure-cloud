@@ -19,6 +19,8 @@
 #include "network/MessageService.hpp"
 #include "ui/ChatMessage.hpp"
 
+class QDialog;
+
 namespace ui {
 
 class MainWindow : public QMainWindow {
@@ -83,6 +85,9 @@ class MainWindow : public QMainWindow {
   void loadPeerKey(const QString& conversationId, bool revalidate = false);
   void clearConversationKeys(const QString& id);
   void clearCrypto();
+  void showPeerTrustDetails(const QString& details);
+  QDialog* securityDialog_;
+  QLabel* securityWarningLabel_;
   QLabel* localFingerprintLabel_;
   QLabel* peerTrustLabel_;
   QHash<QString, QString> peerTrustDetails_;

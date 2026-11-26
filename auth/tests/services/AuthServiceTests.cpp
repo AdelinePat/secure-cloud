@@ -16,9 +16,9 @@ TEST(AuthServiceTests, RefreshValidToken) {
 
   // Load the ES256 test key pair.
   const std::string privateKeyPath =
-      "/app/auth/tests/fixtures/test-private.pem";
+      SECURECHAT_TEST_KEYS "/test-private.pem";
 
-  const std::string publicKeyPath = "/app/auth/tests/fixtures/test-public.pem";
+  const std::string publicKeyPath = SECURECHAT_TEST_KEYS "/test-public.pem";
 
   auth::crypto::JwtKeyManager jwtKeyManager(privateKeyPath, publicKeyPath);
 

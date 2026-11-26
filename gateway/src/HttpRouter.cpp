@@ -148,7 +148,8 @@ http::response<http::string_body> HttpRouter::route(
           http::status::method_not_allowed, request.version()};
 
       response.set(http::field::content_type, "application/json");
-      response.set(http::field::allow, "GET, POST");
+      response.set(http::field::allow,
+                   isIdentityRoute ? "PUT" : isPeerRoute ? "GET" : "GET, POST");
       response.body() = R"({"error":"METHOD_NOT_ALLOWED"})";
       response.prepare_payload();
 

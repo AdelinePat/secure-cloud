@@ -112,8 +112,10 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
   }
 
   void rejectTooLarge() {
+    const unsigned version =
+        parser_->is_header_done() ? parser_->get().version() : 11;
     http::response<http::string_body> response{http::status::payload_too_large,
-                                               parser_->get().version()};
+                                               version};
     response.set(http::field::content_type, "application/json");
     response.body() = R"({"error":"PAYLOAD_TOO_LARGE"})";
     response.prepare_payload();
@@ -175,15 +177,10 @@ std::uint16_t HttpServer::localPort() const {
 void HttpServer::acceptConnection() {
   using boost::asio::ip::tcp;
 
-  std::cerr << "[SERVER] Waiting for connection..." << '\n';
-
   acceptor_.async_accept(
       [this](const boost::system::error_code& ec, tcp::socket socket) {
         if (!ec) {
           ++acceptedConnections_;
-
-          std::cerr << "[SERVER] Connection accepted: " << acceptedConnections_
-                    << '\n';
 
           std::make_shared<HttpSession>(std::move(socket), router_)->start();
         } else {

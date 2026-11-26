@@ -82,6 +82,7 @@ nlohmann::json validPayload() {
   const auto t = now();
   return {{"sub", "11111111-1111-1111-1111-111111111111"},
           {"iss", "securechat-auth"},
+          {"aud", "securechat-api"},
           {"jti", "token-id"},
           {"iat", t - 10},
           {"exp", t + 600}};

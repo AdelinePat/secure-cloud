@@ -7,9 +7,9 @@ namespace {
 
 TEST(JwtKeyManagerTest, LoadsValidEs256KeyPair) {
   const std::string privateKeyPath =
-      "/app/auth/tests/fixtures/test-private.pem";
+      SECURECHAT_TEST_KEYS "/test-private.pem";
 
-  const std::string publicKeyPath = "/app/auth/tests/fixtures/test-public.pem";
+  const std::string publicKeyPath = SECURECHAT_TEST_KEYS "/test-public.pem";
 
   ASSERT_NO_THROW({
     auth::crypto::JwtKeyManager keyManager(privateKeyPath, publicKeyPath);
@@ -21,9 +21,9 @@ TEST(JwtKeyManagerTest, LoadsValidEs256KeyPair) {
 
 TEST(JwtKeyManagerTest, RejectsMissingPrivateKey) {
   const std::string privateKeyPath =
-      "/app/auth/tests/fixtures/missing-private.pem";
+      SECURECHAT_TEST_KEYS "/missing-private.pem";
 
-  const std::string publicKeyPath = "/app/auth/tests/fixtures/test-public.pem";
+  const std::string publicKeyPath = SECURECHAT_TEST_KEYS "/test-public.pem";
 
   EXPECT_THROW(
       auth::crypto::JwtKeyManager keyManager(privateKeyPath, publicKeyPath),
@@ -33,9 +33,9 @@ TEST(JwtKeyManagerTest, RejectsMissingPrivateKey) {
 TEST(JwtKeyManagerTest, RejectsMismatchedKeyPair) {
   // Use the private key from pair A and the public key from pair B.
   const std::string privateKeyPath =
-      "/app/auth/tests/fixtures/test-private.pem";
+      SECURECHAT_TEST_KEYS "/test-private.pem";
 
-  const std::string publicKeyPath = "/app/auth/tests/fixtures/other-public.pem";
+  const std::string publicKeyPath = SECURECHAT_TEST_KEYS "/other-public.pem";
 
   EXPECT_THROW(
       auth::crypto::JwtKeyManager keyManager(privateKeyPath, publicKeyPath),

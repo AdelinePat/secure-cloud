@@ -30,6 +30,7 @@ add_library(securechat_jwt STATIC
 
 target_include_directories(securechat_jwt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../security/include  # TokenFormat.hpp
 )
 
 target_link_libraries(securechat_jwt PUBLIC

@@ -1,5 +1,7 @@
 #include "common/jwt/JwtVerifier.hpp"
 
+#include "common/security/TokenFormat.hpp"
+
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/ecdsa.h>
@@ -22,11 +24,13 @@ namespace {
 std::string decodeBase64Url(const std::string& encoded) {
   std::string decoded(encoded.size(), '\0');
   std::size_t decodedSize = 0;
+  const char* end = nullptr;
 
   if (sodium_base642bin(reinterpret_cast<unsigned char*>(decoded.data()),
                         decoded.size(), encoded.data(), encoded.size(), nullptr,
-                        &decodedSize, nullptr,
-                        sodium_base64_VARIANT_URLSAFE_NO_PADDING) != 0) {
+                        &decodedSize, &end,
+                        sodium_base64_VARIANT_URLSAFE_NO_PADDING) != 0 ||
+      end != encoded.data() + encoded.size()) {
     throw std::runtime_error("Invalid Base64URL encoding");
   }
 
@@ -135,6 +139,10 @@ std::unique_ptr<FILE, FileDeleter> file(
 }
 
 std::optional<std::string> JwtVerifier::verify(const std::string& token) const {
+  if (token.size() > common::security::maxAccessTokenSize) {
+    return std::nullopt;
+  }
+
   try {
     const auto firstDot = token.find('.');
     if (firstDot == std::string::npos) {
@@ -169,13 +177,15 @@ std::optional<std::string> JwtVerifier::verify(const std::string& token) const {
     if (!payload.is_object() || !payload.contains("sub") ||
         !payload["sub"].is_string() || !payload.contains("iss") ||
         !payload["iss"].is_string() || payload["iss"] != "securechat-auth" ||
+        !payload.contains("aud") || !payload["aud"].is_string() ||
+        payload["aud"] != common::security::accessTokenAudience ||
         !payload.contains("jti") || !payload["jti"].is_string() ||
         !payload.contains("iat") || !payload["iat"].is_number_integer() ||
         !payload.contains("exp") || !payload["exp"].is_number_integer()) {
       return std::nullopt;
     }
 
-    const auto subject = payload["sub"].get<std::string>();
+    auto subject = payload["sub"].get<std::string>();
     const auto tokenId = payload["jti"].get<std::string>();
     const auto issuedAt = payload["iat"].get<std::int64_t>();
     const auto expiresAt = payload["exp"].get<std::int64_t>();
@@ -184,7 +194,7 @@ std::optional<std::string> JwtVerifier::verify(const std::string& token) const {
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
 
-    if (subject.empty() || tokenId.empty() || issuedAt > now ||
+    if (!common::security::isUuid(subject) || tokenId.empty() || issuedAt > now ||
         expiresAt <= now || expiresAt <= issuedAt) {
       return std::nullopt;
     }
@@ -196,6 +206,11 @@ std::optional<std::string> JwtVerifier::verify(const std::string& token) const {
       return std::nullopt;
     }
 
+    for (auto& c : subject) {
+      if (c >= 'A' && c <= 'F') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
     return subject;
 
   } catch (const std::exception&) {

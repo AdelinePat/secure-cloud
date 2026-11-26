@@ -1,5 +1,6 @@
 #include <sodium.h>
 
+#include <QDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QPointer>
@@ -26,10 +27,29 @@
 class TestMainWindow : public QObject {
   Q_OBJECT
  private slots:
+  void securityDialogOpensAndCloses();
   void loginNavigationAndTokenRotation();
   void listingRejectsInvalidResponses_data();
   void listingRejectsInvalidResponses();
 };
+
+void TestMainWindow::securityDialogOpensAndCloses() {
+  network::HttpClient client(QUrl("http://127.0.0.1"));
+  ui::MainWindow window(client);
+
+  auto* button = window.findChild<QPushButton*>("securityButton");
+  auto* dialog = window.findChild<QDialog*>("securityDialog");
+  QVERIFY(button && dialog);
+  QVERIFY(!dialog->isVisible());
+
+  button->click();
+  QVERIFY(dialog->isVisible());
+  QVERIFY(dialog->findChild<QLabel*>("localFingerprintLabel"));
+  QVERIFY(dialog->findChild<QLabel*>("peerTrustLabel"));
+
+  QTest::keyClick(dialog, Qt::Key_Escape);
+  QVERIFY(!dialog->isVisible());
+}
 
 void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(sodium_init() >= 0);
@@ -205,10 +225,18 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(historyTimer);
   QCOMPARE(historyTimer->interval(), 3000);
   QVERIFY(identityPublished);
-  auto* ownFingerprint = window.findChild<QLabel*>("localFingerprintLabel");
+  auto* securityButton = window.findChild<QPushButton*>("securityButton");
+  auto* securityDialog = window.findChild<QDialog*>("securityDialog");
+  QVERIFY(securityButton && securityDialog);
+  QVERIFY(!securityDialog->isVisible());
+  securityButton->click();
+  QVERIFY(securityDialog->isVisible());
+  auto* ownFingerprint = securityDialog->findChild<QLabel*>("localFingerprintLabel");
   QVERIFY(ownFingerprint);
   QVERIFY(ownFingerprint->text().contains(
       crypto::PeerTrustStore::fingerprint(clientPublicKey)));
+  securityDialog->reject();
+  QVERIFY(!securityDialog->isVisible());
   QTRY_VERIFY(historyTimer->isActive());
   QTRY_VERIFY(groupHistoryRequests >= 1);
 
@@ -293,8 +321,9 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
 
   // Refresh must check the peer while an old history reply is still in flight.
   auto* reload = window.findChild<QPushButton*>("reloadConversationsButton");
-  auto* trustLabel = window.findChild<QLabel*>("peerTrustLabel");
-  QVERIFY(reload && trustLabel);
+  auto* trustLabel = securityDialog->findChild<QLabel*>("peerTrustLabel");
+  auto* securityWarning = window.findChild<QLabel*>("securityWarningLabel");
+  QVERIFY(reload && trustLabel && securityWarning);
   QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(peer.publicKey)));
   offeredKey = replacement.publicKey;
   reload->click();
@@ -303,6 +332,10 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QTRY_VERIFY(trustLabel->text().contains("peer key changed"));
   QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(peer.publicKey)));
   QVERIFY(trustLabel->text().contains(crypto::PeerTrustStore::fingerprint(offeredKey)));
+  QVERIFY(securityWarning->text().contains("E2EE blocked"));
+  QVERIFY(!securityWarning->text().contains(peerId));
+  QVERIFY(!securityWarning->text().contains(
+      crypto::PeerTrustStore::fingerprint(offeredKey)));
   auto staleMessage = message;
   staleMessage.insert("message_id", "stale-history");
   const auto staleHistory = QJsonDocument(
