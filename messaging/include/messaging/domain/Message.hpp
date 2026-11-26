@@ -15,6 +15,7 @@ struct Message {
   std::string nonce;
   int16_t encryption_version = 1;
   std::string server_timestamp;         // ISO8601, populated by the store
+  std::optional<std::string> sender_username;
 };
 
 }  // namespace messaging::domain

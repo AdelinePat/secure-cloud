@@ -596,6 +596,7 @@ int main() {
                     {{"message_id", message.id},
                      {"conversation_id", message.conversation_id},
                      {"user_id", message.user_id.value_or("")},
+                     {"sender_username", message.sender_username.value_or("")},
                      {"ciphertext", encodeBase64(message.ciphertext)},
                      {"nonce", message.nonce},
                      {"encryption_version", message.encryption_version},

@@ -77,6 +77,7 @@ QNetworkReply* HttpClient::listConversations(const QString& jwt) {
   QUrl url = baseUrl_;
   url.setPath("/messaging/conversations");
   QNetworkRequest request(url);
+  request.setTransferTimeout(10000);
   request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
   return networkManager_.get(request);
 }

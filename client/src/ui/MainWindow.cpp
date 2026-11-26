@@ -217,6 +217,12 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
     loadConversations();
   });
 
+  conversationListTimer_ = new QTimer(this);
+  conversationListTimer_->setObjectName("conversationListTimer");
+  conversationListTimer_->setInterval(5000);
+  connect(conversationListTimer_, &QTimer::timeout, this,
+          [this] { loadConversations(true); });
+
   // Register both pages.
   stackedWidget_->addWidget(loginPage_);
   stackedWidget_->addWidget(chatPage_);
@@ -300,11 +306,13 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
             conversationList_->count() > 0) {
           conversationList_->setCurrentRow(0);
         }
-        statusBar()->showMessage(
-            conversationList_->count() == 0
-                ? "No conversations yet. Create one to begin."
-                : "Conversations loaded",
-            5000);
+        if (!listingInBackground_) {
+          statusBar()->showMessage(
+              conversationList_->count() == 0
+                  ? "No conversations yet. Create one to begin."
+                  : "Conversations loaded",
+              5000);
+        }
       });
   connect(&conversationService_,
           &network::ConversationService::conversationsLoadFailed, this,
@@ -316,7 +324,9 @@ MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
               loadConversations();
               return;
             }
-            statusBar()->showMessage("Could not load conversations: " + error);
+            if (!listingInBackground_) {
+              statusBar()->showMessage("Could not load conversations: " + error);
+            }
           });
   connect(loginButton_, &QPushButton::clicked, this,
           &MainWindow::onLoginClicked);
@@ -480,6 +490,7 @@ void MainWindow::onLoginClicked() {
 
               passwordInput_->clear();
               loadConversations();
+              conversationListTimer_->start();
             });
       });
 }
@@ -573,6 +584,7 @@ void MainWindow::refreshAccessToken() {
 }
 
 void MainWindow::resetConversations() {
+  conversationListTimer_->stop();
   historyTimer_->stop();
   ++sessionGeneration_;
   ++selectionGeneration_;
@@ -617,12 +629,15 @@ void MainWindow::addConversation(const QString& id, const QString& name,
     conversationTitle_->setText(item->text());
 }
 
-void MainWindow::loadConversations() {
+void MainWindow::loadConversations(bool background) {
   if (accessToken_.isEmpty() || listingPending_) return;
   listingPending_ = true;
+  listingInBackground_ = background;
   listingSession_ = sessionGeneration_;
-  reloadConversationsButton_->setEnabled(false);
-  statusBar()->showMessage("Loading conversations...");
+  if (!background) {
+    reloadConversationsButton_->setEnabled(false);
+    statusBar()->showMessage("Loading conversations...");
+  }
   conversationService_.listConversations(accessToken_);
 }
 
@@ -919,6 +934,12 @@ void MainWindow::applyHistory(const QString& conversationId,
 
     const QString senderId = message.value("user_id").toString();
 
+    const QString senderUsername = message.value("sender_username").toString();
+
+    qDebug() << "History sender_username present:"
+         << message.contains("sender_username")
+         << "empty:" << senderUsername.isEmpty();
+
     const QString nonce = message.value("nonce").toString();
 
     const QString ciphertext = message.value("ciphertext").toString();
@@ -940,6 +961,7 @@ void MainWindow::applyHistory(const QString& conversationId,
     chatMessage.status = MessageStatus::Sent;
 
     chatMessage.senderId = senderId;
+    chatMessage.senderUsername = senderUsername;
     chatMessage.nonce = nonce;
     chatMessage.ciphertext = ciphertext;
 
@@ -1022,9 +1044,15 @@ void MainWindow::refreshMessages() {
     // Render untrusted plaintext as text, never as HTML.
     auto cursor = messageView_->textCursor();
     cursor.movePosition(QTextCursor::End);
-    cursor.insertText(
-        (message.senderId == currentUserId_ ? "You: " : "Peer: ") +
-        message.text + " [" + statusText + "]\n");
+    QString senderLabel;
+    if (message.senderId == currentUserId_) {
+      senderLabel = "You: ";
+    } else if (message.senderUsername.isEmpty()) {
+      senderLabel = "Peer: ";
+    } else {
+      senderLabel = message.senderUsername + ": ";
+    }
+    cursor.insertText(senderLabel + message.text + " [" + statusText + "]\n");
   }
 }
 
