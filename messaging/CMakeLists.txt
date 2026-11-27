@@ -52,6 +52,9 @@ if(MESSAGING_LIB_SOURCES)
         libpqxx::pqxx
         ${SODIUM_LIBRARY}
         nlohmann_json::nlohmann_json
+        Boost::headers
+        Threads::Threads
+        securechat_audit_client
     )
 
     target_compile_options(messaging_lib PRIVATE
@@ -74,11 +77,7 @@ if(TARGET messaging_lib)
     target_link_libraries(messaging PRIVATE messaging_lib)
 endif()
 
-# Dependencies for the HTTP server (Boost.Asio / Boost.Beast) and audit emitter
 target_link_libraries(messaging PRIVATE
-    Boost::headers
-    Threads::Threads
-    securechat_audit_client
     securechat_jwt
 )
 
