@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iomanip>
 #include <random>
 #include <sstream>
 #include <unordered_map>
@@ -79,10 +80,14 @@ class InMemoryConversationRepository : public IConversationRepository {
  private:
   std::unordered_map<std::string, domain::Conversation> conversationsById_;
 
+  // Random UUID-shaped id, so routes that validate ids accept it.
   static std::string generateId() {
     static std::mt19937_64 rng{std::random_device{}()};
     std::ostringstream oss;
-    oss << std::hex << rng();
+    oss << std::hex << std::setfill('0') << std::setw(8) << (rng() & 0xffffffffu)
+        << '-' << std::setw(4) << (rng() & 0xffffu) << "-4" << std::setw(3)
+        << (rng() & 0xfffu) << "-8" << std::setw(3) << (rng() & 0xfffu) << '-'
+        << std::setw(12) << (rng() & 0xffffffffffffULL);
     return oss.str();
   }
 };

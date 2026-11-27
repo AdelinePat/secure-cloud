@@ -6,20 +6,6 @@ PostgresConversationRepository::PostgresConversationRepository(
     pqxx::connection& conn)
     : conn_(conn) {}
 
-std::optional<std::string> PostgresConversationRepository::findUserIdByUsername(
-    const std::string& username) {
-  pqxx::work txn(conn_);
-
-  const auto rows =
-      txn.exec_params("SELECT id FROM users WHERE username = $1", username);
-
-  if (rows.empty()) {
-    return std::nullopt;
-  }
-
-  return rows[0]["id"].as<std::string>();
-}
-
 std::vector<domain::Participant>
 PostgresConversationRepository::fetchParticipants(
     pqxx::work& txn, const std::string& conversationId) {
