@@ -113,6 +113,7 @@ add_library(securechat_network
     src/network/ConversationService.cpp
     src/network/FileMessage.cpp
     src/network/FileService.cpp
+    src/network/TlsTrust.cpp
     src/ui/MessageStatusMapper.cpp
 
     include/ui/MessageStatusMapper.hpp
@@ -121,6 +122,7 @@ add_library(securechat_network
     include/network/ConversationService.hpp
     include/network/HttpClient.hpp
     include/network/FileService.hpp
+    include/network/TlsTrust.hpp
 )
 
 target_include_directories(securechat_network PUBLIC
@@ -451,3 +453,8 @@ add_executable(test_FileService tests/network/test_FileService.cpp)
 target_link_libraries(test_FileService PRIVATE securechat_network Qt6::Test Qt6::Network)
 set_target_properties(test_FileService PROPERTIES AUTOMOC ON)
 add_test(NAME FileServiceTests COMMAND test_FileService)
+
+add_executable(test_TlsTrust tests/network/test_TlsTrust.cpp)
+target_link_libraries(test_TlsTrust PRIVATE securechat_network Qt6::Test Qt6::Network)
+set_target_properties(test_TlsTrust PROPERTIES AUTOMOC ON)
+add_test(NAME TlsTrustTests COMMAND test_TlsTrust)
