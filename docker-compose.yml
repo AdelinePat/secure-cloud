@@ -1,6 +1,8 @@
 services:
   gateway:
     depends_on:
+      certs:
+        condition: service_completed_successfully
       auth:
         condition: service_started
       messaging:
@@ -15,6 +17,9 @@ services:
       AUTH_PORT: ${AUTH_PORT}
       FILE_HOST: file
       FILE_PORT: "8083"
+      # HTTPS for the desktop client (certificate from the certs service).
+      GATEWAY_TLS_CERT: /app/certs/gateway/gateway.crt
+      GATEWAY_TLS_KEY: /app/certs/gateway/gateway.key
     ports:
       - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     build:
@@ -22,11 +27,13 @@ services:
       dockerfile: Dockerfile
     volumes:
       - type: bind
-        source: ./certs/ca/ca.crt
-        target: /app/certs/ca/ca.crt
+        source: ./certs/ca
+        target: /app/certs/ca
+        read_only: true
       - type: bind
         source: ./certs/gateway
         target: /app/certs/gateway
+        read_only: true
       - type: bind
         source: ./gateway
         target: /app/gateway
@@ -34,6 +41,26 @@ services:
         source: ./secureChat.sh
         target: /app/secureChat.sh
     command: [ "bash", "./secureChat.sh", "run", "gateway" ]
+
+  # One-shot: creates the development CA and each service's key + certificate
+  # in ./certs on first start (nothing there is committed). Re-runs on every
+  # `up`, keeps what is still valid. Only this container sees the CA key.
+  certs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: [ "sh", "/tools/ensure-certs.sh", "/certs" ]
+    restart: "no"
+    environment:
+      GATEWAY_EXTRA_SANS: ${GATEWAY_EXTRA_SANS:-}
+    volumes:
+      - type: bind
+        source: ./tools/ensure-certs.sh
+        target: /tools/ensure-certs.sh
+        read_only: true
+      - type: bind
+        source: ./certs
+        target: /certs
 
   # One-shot: creates the JWT key pair on first start (empty auth-keys volume)
   # and publishes the public key to jwt-public. Re-runs on every `up`, keeps
@@ -61,6 +88,8 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
+      certs:
+        condition: service_completed_successfully
       jwt-keys:
         condition: service_completed_successfully
       app-db:
@@ -84,11 +113,13 @@ services:
       AUDIT_SPOOL_DIR: "/app/audit-spool/auth"
     volumes:
       - type: bind
-        source: ./certs/ca/ca.crt
-        target: /app/certs/ca/ca.crt
+        source: ./certs/ca
+        target: /app/certs/ca
+        read_only: true
       - type: bind
         source: ./certs/auth
         target: /app/certs/auth
+        read_only: true
       - type: bind
         source: ./common
         target: /app/common
@@ -125,14 +156,17 @@ services:
       AUDIT_TLS_CA: "/app/certs/ca/ca.crt"
       AUDIT_SPOOL_DIR: "/app/audit-spool/messaging"
     depends_on:
+      certs:
+        condition: service_completed_successfully
       jwt-keys:
         condition: service_completed_successfully
       app-db:
         condition: service_healthy
     volumes:
       - type: bind
-        source: ./certs/ca/ca.crt
-        target: /app/certs/ca/ca.crt
+        source: ./certs/ca
+        target: /app/certs/ca
+        read_only: true
       # Public key only (published by jwt-keys); the private key stays in
       # auth-keys, which is mounted into auth alone.
       - type: volume
@@ -142,6 +176,7 @@ services:
       - type: bind
         source: ./certs/messaging
         target: /app/certs/messaging
+        read_only: true
       - type: bind
         source: ./common
         target: /app/common
@@ -165,6 +200,8 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
+      certs:
+        condition: service_completed_successfully
       jwt-keys:
         condition: service_completed_successfully
       app-db:
@@ -187,8 +224,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB_DATA}
     volumes:
       - type: bind
-        source: ./certs/ca/ca.crt
-        target: /app/certs/ca/ca.crt
+        source: ./certs/ca
+        target: /app/certs/ca
+        read_only: true
       # Public key only (published by jwt-keys), as for messaging.
       - type: volume
         source: jwt-public
@@ -197,6 +235,7 @@ services:
       - type: bind
         source: ./certs/file
         target: /app/certs/file
+        read_only: true
       - type: bind
         source: ./common
         target: /app/common
@@ -219,6 +258,8 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
+      certs:
+        condition: service_completed_successfully
       audit-db:
         condition: service_healthy
     environment:
@@ -238,11 +279,13 @@ services:
       - "${AUDIT_PORT}"
     volumes:
       - type: bind
-        source: ./certs/ca/ca.crt
-        target: /app/certs/ca/ca.crt
+        source: ./certs/ca
+        target: /app/certs/ca
+        read_only: true
       - type: bind
         source: ./certs/audit
         target: /app/certs/audit
+        read_only: true
       - type: bind
         source: ./audit
         target: /app/audit

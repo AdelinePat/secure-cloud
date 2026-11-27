@@ -30,6 +30,20 @@ This also deletes the JWT signing key (`auth-keys` volume): the one-shot
 through the `jwt-public` volume. Tokens issued before are then invalid, so
 log in again.
 
+### Certificates and HTTPS
+
+The first `up` also runs the one-shot `certs` service
+(`tools/ensure-certs.sh`), which creates a development CA and a certificate
+for each service in `certs/`. Nothing there is committed, and `down -v` does
+not delete it. The gateway serves **HTTPS** on `GATEWAY_PORT`:
+
+```bash
+curl --cacert certs/ca/ca.crt https://localhost:8080/health
+```
+
+See [certs/README.md](certs/README.md) for what is generated, when it is
+renewed, and how to connect from another machine.
+
 Start a service
 
 ```bash
@@ -104,6 +118,13 @@ dos2unix <fileName>
 ```
 
 ## How to build client
+
+The client connects to `https://localhost:8080` and trusts only the
+development CA, which it looks for in `certs/ca/ca.crt` above its own
+folder. Start the backend once (`docker compose up`) before running the
+client, so that file exists. To point it elsewhere, set
+`SECURECHAT_GATEWAY_URL` and `SECURECHAT_CA_FILE` (see
+[certs/README.md](certs/README.md)).
 
 ### client on Windows
 

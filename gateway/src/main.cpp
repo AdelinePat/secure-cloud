@@ -6,6 +6,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -31,9 +32,23 @@ int main() {
       port = static_cast<std::uint16_t>(parsedPort);
     }
 
+    // HTTPS when both PEM files are configured, plain HTTP otherwise.
+    std::optional<gateway::TlsFiles> tls;
+    const char* certPath = std::getenv("GATEWAY_TLS_CERT");
+    const char* keyPath = std::getenv("GATEWAY_TLS_KEY");
+    const bool hasCert = certPath != nullptr && certPath[0] != '\0';
+    const bool hasKey = keyPath != nullptr && keyPath[0] != '\0';
+    if (hasCert != hasKey) {
+      throw std::runtime_error(
+          "Set both GATEWAY_TLS_CERT and GATEWAY_TLS_KEY, or neither");
+    }
+    if (hasCert) {
+      tls = gateway::TlsFiles{certPath, keyPath};
+    }
+
     boost::asio::io_context ioContext;
 
-    gateway::HttpServer server(ioContext, port);
+    gateway::HttpServer server(ioContext, port, tls);
 
     server.start();
 
@@ -50,6 +65,7 @@ int main() {
         });
 
     std::cout << "SecureChat Gateway listening on port " << server.localPort()
+              << (server.tlsEnabled() ? " (HTTPS)" : " (plain HTTP, no TLS)")
               << std::endl;
 
     // Process asynchronous network operations

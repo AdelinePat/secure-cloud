@@ -1,13 +1,19 @@
 #include "gateway/HttpServer.hpp"
 
+#include <openssl/ssl.h>
+
+#include <boost/asio/ssl.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
 #include <array>
 #include <chrono>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "gateway/HttpResponse.hpp"
@@ -19,10 +25,38 @@ namespace beast = boost::beast;
 namespace http = beast::http;
 using tcp = boost::asio::ip::tcp;
 
-HttpServer::HttpServer(boost::asio::io_context& ioContext, std::uint16_t port)
+namespace ssl = boost::asio::ssl;
+
+namespace {
+
+// A client that connects but never finishes the TLS handshake, or never
+// sends a complete request, is dropped after these delays.
+constexpr std::chrono::seconds kHandshakeTimeout{30};
+constexpr std::chrono::seconds kReadTimeout{60};
+constexpr std::chrono::seconds kShutdownTimeout{5};
+
+std::unique_ptr<ssl::context> makeSslContext(const TlsFiles& files) {
+  auto context = std::make_unique<ssl::context>(ssl::context::tls_server);
+  context->set_options(ssl::context::default_workarounds |
+                       ssl::context::no_sslv2 | ssl::context::no_sslv3 |
+                       ssl::context::no_tlsv1 | ssl::context::no_tlsv1_1 |
+                       ssl::context::single_dh_use);
+  context->use_certificate_chain_file(files.certificateChain);
+  context->use_private_key_file(files.privateKey, ssl::context::pem);
+  if (SSL_CTX_check_private_key(context->native_handle()) != 1) {
+    throw std::runtime_error("TLS private key does not match the certificate");
+  }
+  return context;
+}
+
+}  // namespace
+
+HttpServer::HttpServer(boost::asio::io_context& ioContext, std::uint16_t port,
+                       std::optional<TlsFiles> tls)
     : ioContext_(ioContext),
       port_(port),
       acceptor_(ioContext),
+      sslContext_(tls ? makeSslContext(*tls) : nullptr),
       httpClient_(),
       router_(httpClient_) {}
 
@@ -48,16 +82,44 @@ void HttpServer::start() {
   acceptConnection();
 }
 
-class HttpSession : public std::enable_shared_from_this<HttpSession> {
+// One connection. Stream is beast::tcp_stream (plain HTTP) or
+// beast::ssl_stream<beast::tcp_stream> (HTTPS): the HTTP handling is the
+// same, only the handshake and the shutdown differ.
+template <class Stream>
+class HttpSession : public std::enable_shared_from_this<HttpSession<Stream>> {
+  static constexpr bool kTls =
+      !std::is_same_v<Stream, beast::tcp_stream>;
+
  public:
-  explicit HttpSession(tcp::socket socket, HttpRouter& router)
+  // Plain HTTP.
+  HttpSession(tcp::socket socket, HttpRouter& router)
+    requires(!kTls)
       : stream_(std::move(socket)), router_(router) {}
 
-  void start() { readRequest(); }
+  // HTTPS.
+  HttpSession(tcp::socket socket, ssl::context& context, HttpRouter& router)
+    requires(kTls)
+      : stream_(std::move(socket), context), router_(router) {}
+
+  void start() {
+    if constexpr (kTls) {
+      auto self = this->shared_from_this();
+      lowest().expires_after(kHandshakeTimeout);
+      stream_.async_handshake(ssl::stream_base::server,
+                              [self](beast::error_code ec) {
+                                if (!ec) self->readRequest();
+                              });
+    } else {
+      readRequest();
+    }
+  }
 
  private:
+  beast::tcp_stream& lowest() { return beast::get_lowest_layer(stream_); }
+
   void readRequest() {
-    auto self = shared_from_this();
+    auto self = this->shared_from_this();
+    lowest().expires_after(kReadTimeout);
 
     // The body limit depends on the target (file chunk uploads may be larger
     // than other requests), so read the headers first. Beast compares
@@ -92,7 +154,7 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
     }
     parser_->body_limit(limit);  // still enforced for chunked bodies
 
-    auto self = shared_from_this();
+    auto self = this->shared_from_this();
     http::async_read(stream_, buffer_, *parser_,
                      [self](beast::error_code ec, std::size_t) {
                        self->onRead(ec);
@@ -108,6 +170,9 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
       return;
     }
 
+    // The router calls the backend synchronously; don't let the read
+    // timeout fire meanwhile.
+    lowest().expires_never();
     sendResponse(router_.route(parser_->get()));
   }
 
@@ -131,36 +196,61 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
     response_ = std::move(response);
     response_.keep_alive(false);
 
-    auto self = shared_from_this();
+    auto self = this->shared_from_this();
 
+    lowest().expires_after(kReadTimeout);
     http::async_write(stream_, response_,
                       [self, drainRequest](beast::error_code ec, std::size_t) {
                         if (ec) {
                           return;
                         }
 
-                        beast::error_code shutdownError;
-                        self->stream_.socket().shutdown(
-                            tcp::socket::shutdown_send, shutdownError);
-
                         if (drainRequest) {
-                          self->stream_.expires_after(std::chrono::seconds(5));
+                          if constexpr (!kTls) {
+                            // Plain TCP: signal the end of the response
+                            // first, then discard what is still coming.
+                            beast::error_code ignored;
+                            self->lowest().socket().shutdown(
+                                tcp::socket::shutdown_send, ignored);
+                          }
+                          self->lowest().expires_after(std::chrono::seconds(5));
                           self->drain();
+                          return;
                         }
+                        self->close();
                       });
   }
 
   // Discards incoming bytes until the client closes or the timeout expires.
   void drain() {
-    auto self = shared_from_this();
+    auto self = this->shared_from_this();
     stream_.async_read_some(
         boost::asio::buffer(drainBuffer_),
         [self](beast::error_code ec, std::size_t) {
-          if (!ec) self->drain();
+          if (!ec) {
+            self->drain();
+          } else if constexpr (kTls) {
+            self->close();
+          }
         });
   }
 
-  beast::tcp_stream stream_;
+  // Ends the connection once the response is written. TLS sends a
+  // close_notify so the client can tell a complete response from a cut one.
+  void close() {
+    if constexpr (kTls) {
+      auto self = this->shared_from_this();
+      lowest().expires_after(kShutdownTimeout);
+      stream_.async_shutdown([self](beast::error_code) {
+        self->lowest().close();
+      });
+    } else {
+      beast::error_code ignored;
+      lowest().socket().shutdown(tcp::socket::shutdown_send, ignored);
+    }
+  }
+
+  Stream stream_;
   beast::flat_buffer buffer_;
 
   std::optional<http::request_parser<http::string_body>> parser_;
@@ -182,7 +272,16 @@ void HttpServer::acceptConnection() {
         if (!ec) {
           ++acceptedConnections_;
 
-          std::make_shared<HttpSession>(std::move(socket), router_)->start();
+
+          if (sslContext_) {
+            std::make_shared<HttpSession<beast::ssl_stream<beast::tcp_stream>>>(
+                std::move(socket), *sslContext_, router_)
+                ->start();
+          } else {
+            std::make_shared<HttpSession<beast::tcp_stream>>(std::move(socket),
+                                                             router_)
+                ->start();
+          }
         } else {
           std::cerr << "[SERVER] Accept error: " << ec.message() << '\n';
         }

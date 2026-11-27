@@ -77,3 +77,8 @@ queries.js
 .qtcreator/
 .vscode/
 .zed/
+
+# Development PKI: generated on first `docker compose up` by tools/ensure-certs.sh.
+# Only the folder placeholders are tracked (Compose needs the folders to exist).
+certs/*/*
+!certs/*/.gitkeep

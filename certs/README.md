@@ -1,82 +1,75 @@
-# LPTF — Development Certificates
+# Development certificates
 
-## ⚠️ Warning
+Nothing in this folder is committed except the folder placeholders. The
+certificates are generated on each machine by the one-shot `certs` Compose
+service (`tools/ensure-certs.sh`) the first time you run `docker compose up`.
 
-These certificates are **self-signed and committed intentionally** for development
-convenience. They are not secret in this repository.
-
-**NEVER use these in a production deployment.**  
-For any real deployment, generate fresh certificates and never commit private keys.
+**These are development certificates.** For a real deployment, use
+certificates from your own PKI and keep the CA key off the servers.
 
 ---
 
-## What is in this folder
+## What gets generated
 
-| File | Used by | Purpose |
+| File | Mounted into | Purpose |
 |---|---|---|
-| `ca/ca.crt` | every service | The CA all services trust |
-| `ca/ca.key` | nobody at runtime | Only needed to sign new certs |
-| `<service>/<service>.crt` | that service only | Proves this service's identity to its peers |
-| `<service>/<service>.key` | that service only | Private key, never shared |
-| `ca/ca.srl` | nobody | OpenSSL's serial tracker, don't delete |
+| `private/ca.key` | nothing (only the `certs` service) | Signs the service certificates |
+| `ca/ca.crt` | every service, and the desktop client | The CA everyone trusts |
+| `<service>/<service>.key` | that service only | Its private key |
+| `<service>/<service>.crt` | that service only | `CN=<service>`, SAN `DNS:<service>` |
 
-Unlike a client/server setup where only one side needs a certificate, mTLS
-means every service must both prove its own identity and verify its peers —
-so each of the 5 services has its own key+cert pair, all signed by the same
-dev CA, and each cert's SAN (Subject Alternative Name) matches its Docker
-Compose service name so hostname verification succeeds over the internal network.
+All keys are ECDSA P-256. Service certificates are valid for 825 days, the CA
+for 10 years.
 
----
+Every service has both a key and a certificate because the audit service uses
+mTLS: callers prove who they are with their certificate (audit reads the CN),
+and they check audit's certificate in return. Each SAN matches the Compose
+service name so host name verification works on the internal network.
 
-## How to generate
+The gateway's certificate also covers `localhost` and `127.0.0.1`, because
+the desktop client connects to it through the published port over HTTPS.
 
-Run these commands from the `certs/` directory.
+## When certificates are replaced
 
-### All platform
-#### On windows
-OpenSSL must be installed first. If it is not:
-```powershell
-winget install ShiningLight.OpenSSL
-```
+`ensure-certs.sh` runs on every `docker compose up` and keeps what is still
+good. It replaces:
+
+- the CA, when it is missing or expires within 30 days. All service
+  certificates are then reissued, since they no longer verify;
+- a service certificate, when it is missing, not signed by the current CA,
+  expires within 30 days, or does not have the expected SANs.
+
+To start over with a new CA, delete the generated files and run
+`docker compose up` again:
 
 ```bash
-# Step 1 — Create the Certificate Authority (once)
-openssl genrsa -out ca/ca.key 4096
-openssl req -new -x509 -days 3650 -key ca/ca.key -out ca/ca.crt -subj "/CN=SecureChat-Dev-CA"
-
-# Step 2 — For EACH service, repeat this pattern
-# (shown once for auth; same 3 commands for messaging, file, audit, gateway)
-
-openssl genrsa -out auth/auth.key 2048
-
-openssl req -new -key auth/auth.key -out auth/auth.csr -subj "/CN=auth"
-printf "subjectAltName=DNS:auth" > auth/auth.ext
-
-
-# The SAN extension is the part Inferno's server-only setup didn't need —
-# every service here needs to be verifiable by every other service,
-# so each cert must declare its own DNS name explicitly.
-openssl x509 -req -days 3650 -in auth/auth.csr -CA ca/ca.crt -CAkey ca/ca.key -CAcreateserial -out auth/auth.crt -extfile auth/auth.ext
+find certs -type f ! -name .gitkeep ! -name README.md -delete
 ```
 
-### Linux / macOS
+If you regenerate the CA, restart the desktop client so it loads the new
+`ca/ca.crt`.
+
+## Connecting from another machine
+
+To reach the gateway through a LAN IP or host name, add it to the gateway
+certificate in `.env`, then run `docker compose up` again (only the gateway
+certificate is reissued):
+
 ```bash
-# Step 3 — Clean up CSRs (Linux/macOS)
-rm */*.csr
+GATEWAY_EXTRA_SANS=IP:192.168.1.20,DNS:securechat.lan
 ```
 
-### Windows (PowerShell)
-```powershell
-# Step 3 — Clean up CSRs (Windows PowerShell)
-Remove-Item */*.csr
+On the other machine, copy `certs/ca/ca.crt` and start the client with:
+
+```bash
+SECURECHAT_GATEWAY_URL=https://192.168.1.20:8080 \
+SECURECHAT_CA_FILE=/path/to/ca.crt ./client
 ```
 
----
+## Inspecting a certificate
 
-## Why self-signed
-
-A real CA (like Let's Encrypt) would require a public domain name and renewal.
-For a local development and testing environment, a self-signed CA is standard
-practice — it provides real TLS encryption and server authentication,
-just without a third-party trust chain.
-
+```bash
+openssl x509 -in certs/gateway/gateway.crt -noout -subject -ext subjectAltName -enddate
+openssl verify -CAfile certs/ca/ca.crt certs/gateway/gateway.crt
+curl --cacert certs/ca/ca.crt https://localhost:8080/health
+```
