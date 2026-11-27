@@ -87,6 +87,7 @@ class MainWindow : public QMainWindow {
     crypto::SessionKeys keys;
   };
   QHash<QString, ConversationKeys> conversationKeys_;
+  QHash<QString, QHash<QString, crypto::SessionKeys>> groupConversationKeys_;
   void loadPeerKey(const QString& conversationId, bool revalidate = false);
   void loadGroupPeerKeys(const QString& id, quint64 session, quint64 selection);
   void clearConversationKeys(const QString& id);

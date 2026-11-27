@@ -112,6 +112,7 @@ add_library(securechat_network
     src/network/MessageService.cpp
     src/network/ConversationService.cpp
     src/network/FileMessage.cpp
+    src/network/GroupMessage.cpp
     src/network/FileService.cpp
     src/ui/MessageStatusMapper.cpp
 

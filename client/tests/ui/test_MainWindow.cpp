@@ -22,6 +22,7 @@
 #include <memory>
 
 #include "network/FileMessage.hpp"
+#include "network/GroupMessage.hpp"
 #include "ui/MainWindow.hpp"
 
 class TestMainWindow : public QObject {
@@ -82,6 +83,7 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   int groupHistoryRequests = 0;
   int peerKeyRequests = 0;
   bool showInvitedConversation = false;
+  QJsonObject sentGroupMessage;
   const auto respond = [](QTcpSocket* socket, const QByteArray& body,
                           const QByteArray& status) {
     socket->write("HTTP/1.1 " + status +
@@ -127,6 +129,22 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
             identityPublished = true;
           }
           body = R"({"status":"ok"})";
+        } else if (request.startsWith("GET /messaging/conversations/invited/peer-key ")) {
+          respond(socket, R"({"error":"TWO_PARTICIPANTS_REQUIRED"})", "409 Conflict");
+          return;
+        } else if (request.startsWith("GET /messaging/conversations/invited/peer-keys ")) {
+          const auto entry = [](const QString& id, const crypto::PublicKey& key) {
+            return QJsonObject{
+                {"user_id", id},
+                {"public_key", QString::fromLatin1(QByteArray(
+                    reinterpret_cast<const char*>(key.data()), key.size()).toBase64())}};
+          };
+          body = QJsonDocument(QJsonObject{{"peers", QJsonArray{
+              entry(peerId, peer.publicKey), entry(otherPeerId, replacement.publicKey)}}}).toJson();
+        } else if (request.startsWith("POST /messaging/conversations/invited/messages ")) {
+          sentGroupMessage = QJsonDocument::fromJson(request.mid(split + 4)).object();
+          respond(socket, "{}", "201 Created");
+          return;
         } else if (request.contains("/peer-key HTTP/1.1")) {
           ++peerKeyRequests;
           const auto key = QByteArray(reinterpret_cast<const char*>(offeredKey.data()),
@@ -386,6 +404,24 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QCOMPARE(input->text(), QString("draft during background refresh"));
   QCOMPARE(peerKeyRequests, keyRequestsBeforeRefresh);
   QVERIFY(historyTimer->isActive());
+
+  list->setCurrentRow(3);
+  QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), QString("invited"));
+  QTRY_VERIFY(send->isEnabled());
+  QVERIFY(attach && !attach->isEnabled());
+  input->setText("Hello, group");
+  send->click();
+  QTRY_VERIFY(!sentGroupMessage.isEmpty());
+  QCOMPARE(sentGroupMessage.value("encryption_version").toInt(),
+           network::kGroupTextMessageVersion);
+  const auto envelopeBytes =
+      QByteArray::fromBase64(sentGroupMessage.value("ciphertext").toString().toLatin1());
+  QVERIFY(!envelopeBytes.contains("Hello, group"));
+  const auto recipients = QJsonDocument::fromJson(envelopeBytes)
+                              .object().value("recipients").toObject();
+  QCOMPARE(recipients.size(), 2);
+  QVERIFY(recipients.contains(peerId));
+  QVERIFY(recipients.contains(otherPeerId));
 
   // A reply from the previous session must not repopulate the cleared chat.
   rejectRefresh = true;

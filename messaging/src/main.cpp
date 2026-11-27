@@ -59,6 +59,47 @@ std::string encodeBase64(const std::vector<unsigned char>& data) {
   return encoded;
 }
 
+bool validGroupEnvelope(const std::vector<unsigned char>& ciphertext,
+                        const messaging::domain::Conversation& conversation,
+                        const std::string& sender) {
+  if (conversation.participants.size() != 3) {
+    return false;
+  }
+
+  const auto envelope =
+      nlohmann::json::parse(ciphertext.begin(), ciphertext.end(), nullptr, false);
+  if (!envelope.is_object() || !envelope.contains("own") ||
+      !envelope["own"].is_string() || !envelope.contains("recipients") ||
+      !envelope["recipients"].is_object() || envelope["recipients"].size() != 2) {
+    return false;
+  }
+
+  const auto own = decodeBase64(envelope["own"].get<std::string>(), 1024 * 1024);
+  if (!own || own->size() < crypto_secretbox_MACBYTES) {
+    return false;
+  }
+
+  const auto& recipients = envelope["recipients"];
+  for (const auto& participant : conversation.participants) {
+    if (participant.user_id == sender) continue;
+    const auto entry = recipients.find(participant.user_id);
+    if (entry == recipients.end() || !entry->is_object() ||
+        !entry->contains("nonce") || !(*entry)["nonce"].is_string() ||
+        !entry->contains("ciphertext") || !(*entry)["ciphertext"].is_string()) {
+      return false;
+    }
+    const auto nonce = decodeBase64((*entry)["nonce"].get<std::string>(),
+                                    crypto_secretbox_NONCEBYTES);
+    const auto box = decodeBase64((*entry)["ciphertext"].get<std::string>(),
+                                  1024 * 1024);
+    if (!nonce || nonce->size() != crypto_secretbox_NONCEBYTES ||
+        !box || box->size() < crypto_secretbox_MACBYTES) {
+      return false;
+    }
+  }
+  return true;
+}
+
 using tcp = asio::ip::tcp;
 
 namespace {
@@ -555,7 +596,7 @@ int main() {
                   body["encryption_version"].is_number_integer() &&
                   body["encryption_version"] >= 1 &&
                   body["encryption_version"] <=
-                      3;  // 3: file message (see File_API.md)
+                      4;  // 3: file message, 4: group text envelope
 
               if (!validBody) {
                 response.result(http::status::bad_request);
@@ -577,11 +618,20 @@ int main() {
                 const auto ciphertext =
                     decodeBase64(ciphertextBase64, 1024 * 1024);
 
+                const auto version = body["encryption_version"].get<int>();
+                bool groupEnvelopeValid = true;
+                if (version == 4 && ciphertext) {
+                  const auto conversation = conversationRepository.findById(conversationId);
+                  groupEnvelopeValid = conversation &&
+                      validGroupEnvelope(*ciphertext, *conversation, *subject);
+                }
+
                 if (!common::security::isUuid(messageId) ||
                     !nonce.has_value() ||
                     nonce->size() != crypto_secretbox_NONCEBYTES ||
                     !ciphertext.has_value() ||
-                    ciphertext->size() < crypto_secretbox_MACBYTES) {
+                    ciphertext->size() < crypto_secretbox_MACBYTES ||
+                    !groupEnvelopeValid) {
                   response.result(http::status::bad_request);
                   response.body() = R"({"error":"INVALID_ENCRYPTED_MESSAGE"})";
 
@@ -593,8 +643,7 @@ int main() {
                   message.user_id = *subject;
                   message.ciphertext = *ciphertext;
                   message.nonce = nonceBase64;
-                  message.encryption_version =
-                      body["encryption_version"].get<int>();
+                  message.encryption_version = version;
 
                   const auto stored = messageRepository.create(message);
 

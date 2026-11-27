@@ -134,6 +134,36 @@ def run(project):
             charlie_id: charlie_key,
         }, "Incorrect peer keys for three-person group")
 
+        group_messages = f"{conversations}/{three_person_group['id']}/messages"
+        recipients = {
+            account: {"nonce": encoded_random(24), "ciphertext": encoded_random(32)}
+            for account in (bob_id, charlie_id)
+        }
+        own = encoded_random(32)
+        group_message_id = str(uuid.uuid4())
+        group_payload = {
+            "message_id": group_message_id, "nonce": encoded_random(24),
+            "encryption_version": 4,
+        }
+
+        def with_recipients(keys):
+            envelope = json.dumps({"own": own, "recipients": keys}).encode("utf-8")
+            return {**group_payload, "ciphertext": base64.b64encode(envelope).decode("ascii")}
+
+        request(port, "POST", group_messages, 400, token=alice,
+                data=with_recipients({bob_id: recipients[bob_id]}))
+        group_payload = with_recipients(recipients)
+        request(port, "POST", messages, 400, token=alice, data=group_payload)
+        request(port, "POST", group_messages, 201, token=alice, data=group_payload)
+        for member_token in (alice, bob, charlie):
+            group_history = request(port, "GET", group_messages, 200,
+                                    token=member_token)["messages"]
+            check(len(group_history) == 1 and
+                  group_history[0]["message_id"] == group_message_id and
+                  group_history[0]["ciphertext"] == group_payload["ciphertext"] and
+                  group_history[0]["encryption_version"] == 4,
+                  "Group message missing or changed in history")
+
         message_id = str(uuid.uuid4())
         request(port, "POST", messages, 201, token=alice,
                 data={"message_id": message_id, "user_id": bob_id,

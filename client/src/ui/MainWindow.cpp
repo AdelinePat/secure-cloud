@@ -13,6 +13,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QMap>
+#include <QScopeGuard>
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -35,6 +37,7 @@
 #include "crypto/MessageCrypto.hpp"
 #include "crypto/PeerTrustStore.hpp"
 #include "network/FileMessage.hpp"
+#include "network/GroupMessage.hpp"
 #include "network/dto/SendMessageRequest.hpp"
 #include "ui/MessageStatusMapper.hpp"
 
@@ -710,9 +713,10 @@ void MainWindow::onCreateConversationClicked() {
 void MainWindow::onSendClicked() {
   QString message = messageInput_->text().trimmed();
 
+  const bool group = groupConversationKeys_.contains(currentConversationId_);
   if (message.isEmpty() || currentConversationId_.isEmpty() ||
       accessToken_.isEmpty() || !sendButton_->isEnabled() ||
-      !conversationKeys_.contains(currentConversationId_)) {
+      (!group && !conversationKeys_.contains(currentConversationId_))) {
     return;
   }
 
@@ -720,7 +724,8 @@ void MainWindow::onSendClicked() {
   chatMessage.text = message;
   messageInput_->clear();
   sendEncrypted(currentConversationId_, chatMessage, message.toUtf8(),
-                network::kTextMessageVersion);
+                group ? network::kGroupTextMessageVersion
+                      : network::kTextMessageVersion);
 }
 
 void MainWindow::sendEncrypted(const QString& conversationId,
@@ -741,14 +746,22 @@ void MainWindow::sendEncrypted(const QString& conversationId,
   refreshMessages();
 
   try {
-    const auto keys = conversationKeys_.constFind(conversationId);
-    if (keys == conversationKeys_.cend()) {
-      throw std::runtime_error("Conversation key unavailable");
+    crypto::EncryptedMessage encryptedMessage;
+    if (encryptionVersion == network::kGroupTextMessageVersion) {
+      const auto group = groupConversationKeys_.constFind(conversationId);
+      if (!identityKeyPair_ || group == groupConversationKeys_.cend()) {
+        throw std::runtime_error("Group keys unavailable");
+      }
+      encryptedMessage = network::GroupMessage::encrypt(
+          plaintext, conversationId, messageId, identityKeyPair_->privateKey, group.value());
+    } else {
+      const auto keys = conversationKeys_.constFind(conversationId);
+      if (keys == conversationKeys_.cend()) {
+        throw std::runtime_error("Conversation key unavailable");
+      }
+      encryptedMessage =
+          crypto::MessageCrypto::encrypt(plaintext.toStdString(), keys->keys.tx);
     }
-
-    // Encrypt the message before sending it to the network layer
-    crypto::EncryptedMessage encryptedMessage =
-        crypto::MessageCrypto::encrypt(plaintext.toStdString(), keys->keys.tx);
     // A file message's plaintext holds the file key.
     sodium_memzero(plaintext.data(), plaintext.size());
 
@@ -868,6 +881,12 @@ void MainWindow::clearCrypto() {
   for (auto& entry : conversationKeys_)
     sodium_memzero(&entry.keys, sizeof(entry.keys));
   conversationKeys_.clear();
+  for (auto& group : groupConversationKeys_) {
+    for (auto& keys : group) {
+      sodium_memzero(&keys, sizeof(keys));
+    }
+  }
+  groupConversationKeys_.clear();
 }
 
 void MainWindow::clearConversationKeys(const QString& id) {
@@ -875,6 +894,13 @@ void MainWindow::clearConversationKeys(const QString& id) {
   if (entry != conversationKeys_.end()) {
     sodium_memzero(&entry->keys, sizeof(entry->keys));
     conversationKeys_.erase(entry);
+  }
+  auto group = groupConversationKeys_.find(id);
+  if (group != groupConversationKeys_.end()) {
+    for (auto& keys : group.value()) {
+      sodium_memzero(&keys, sizeof(keys));
+    }
+    groupConversationKeys_.erase(group);
   }
 }
 
@@ -1009,7 +1035,7 @@ void MainWindow::loadGroupPeerKeys(const QString& id, quint64 session,
 
   connect(
       reply, &QNetworkReply::finished, this,
-      [this, reply, session, selection]() {
+      [this, reply, id, session, selection]() {
         reply->deleteLater();
 
         if (session != sessionGeneration_ ||
@@ -1019,20 +1045,86 @@ void MainWindow::loadGroupPeerKeys(const QString& id, quint64 session,
 
         peerKeyPending_ = false;
 
-        if (reply->error() != QNetworkReply::NoError) {
-          showPeerTrustDetails("E2EE unavailable: Group peer keys unavailable");
-          return;
+        auto showDetails = [this, &id](const QString& details) {
+          peerTrustDetails_.insert(id, details);
+          showPeerTrustDetails(details);
+        };
+
+        try {
+          if (reply->error() != QNetworkReply::NoError || !identityKeyPair_) {
+            throw std::runtime_error("Group peer keys unavailable");
+          }
+
+          const auto peers = QJsonDocument::fromJson(reply->readAll())
+                                 .object().value("peers").toArray();
+          if (peers.size() != 2) {
+            throw std::runtime_error("Group text requires exactly three participants");
+          }
+
+          QMap<QString, crypto::PublicKey> publicKeys;
+          for (const auto& value : peers) {
+            const auto entry = value.toObject();
+            const QUuid uuid(entry.value("user_id").toString());
+            const auto peer = uuid.toString(QUuid::WithoutBraces);
+            const auto bytes = QByteArray::fromBase64(
+                entry.value("public_key").toString().toLatin1(),
+                QByteArray::AbortOnBase64DecodingErrors);
+            if (uuid.isNull() || peer == currentUserId_ ||
+                publicKeys.contains(peer) || bytes.size() != crypto_kx_PUBLICKEYBYTES) {
+              throw std::runtime_error("Invalid group peer key");
+            }
+            crypto::PublicKey publicKey{};
+            std::copy(bytes.cbegin(), bytes.cend(), publicKey.begin());
+            publicKeys.insert(peer, publicKey);
+          }
+
+          QHash<QString, crypto::SessionKeys> groupKeys;
+          const auto wipe = qScopeGuard([&groupKeys] {
+            for (auto& keys : groupKeys) {
+              sodium_memzero(&keys, sizeof(keys));
+            }
+          });
+
+          QStringList details;
+          int slot = 0;
+          const auto& own = *identityKeyPair_;
+          for (auto entry = publicKeys.cbegin(); entry != publicKeys.cend(); ++entry) {
+            const auto& peer = entry.key();
+            const auto& pk = entry.value();
+            auto keys = currentUserId_ < peer
+                ? crypto::KeyManager::deriveClientSessionKeys(own.publicKey, own.privateKey, pk)
+                : crypto::KeyManager::deriveServerSessionKeys(own.publicKey, own.privateKey, pk);
+            const auto wipePair = qScopeGuard([&keys] {
+              sodium_memzero(&keys, sizeof(keys));
+            });
+
+            // Sorted slots bind both peers to the conversation using the existing TOFU store.
+            const auto binding = QString("group:%1:%2").arg(id).arg(slot++);
+            const auto trust = crypto::PeerTrustStore::checkOrPin(
+                currentUserId_, binding, peer, pk);
+            if (trust.status != crypto::PeerTrustStore::Status::Trusted) {
+              showDetails(QString("E2EE blocked: Group peer identity changed. "
+                                  "Verify the peer through a separate channel.\n"
+                                  "Expected: %1\nSHA-256: %2\nPresented: %3\nSHA-256: %4")
+                              .arg(trust.expectedPeer, trust.expectedFingerprint,
+                                   peer, trust.presentedFingerprint));
+              return;
+            }
+            groupKeys.insert(peer, keys);
+            details.append(QString("Peer UUID: %1\nSHA-256: %2")
+                               .arg(peer, trust.expectedFingerprint));
+          }
+
+          groupConversationKeys_[id].swap(groupKeys);
+          showDetails(details.join("\n\n"));
+          sendButton_->setEnabled(true);
+          historyTimer_->start();
+          requestActiveHistory();
+        } catch (const std::exception& e) {
+          if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
+            showDetails("E2EE unavailable: " + QString::fromUtf8(e.what()));
+          }
         }
-
-        const auto document = QJsonDocument::fromJson(reply->readAll());
-        const auto peers = document.object().value("peers");
-
-        if (!peers.isArray() || peers.toArray().size() != 2) {
-          showPeerTrustDetails("E2EE unavailable: Invalid group peer list");
-          return;
-        }
-
-        showPeerTrustDetails("Group peer keys received. E2EE setup pending.");
       });
 
   QTimer::singleShot(15000, reply, [reply] {
@@ -1146,6 +1238,22 @@ void MainWindow::applyHistory(const QString& conversationId,
 
     chatMessage.encryptionVersion =
         message.value("encryption_version").toInt(1);
+    const auto group = groupConversationKeys_.constFind(conversationId);
+    if (chatMessage.encryptionVersion == network::kGroupTextMessageVersion &&
+        identityKeyPair_ && group != groupConversationKeys_.cend()) {
+      try {
+        constexpr auto strict = QByteArray::AbortOnBase64DecodingErrors;
+        auto plain = network::GroupMessage::decrypt(
+            QByteArray::fromBase64(ciphertext.toLatin1(), strict),
+            QByteArray::fromBase64(nonce.toLatin1(), strict),
+            conversationId, messageId, senderId, currentUserId_,
+            identityKeyPair_->privateKey, group.value());
+        chatMessage.text = QString::fromUtf8(plain);
+        sodium_memzero(plain.data(), plain.size());
+      } catch (const std::exception&) {
+        chatMessage.text = "[Unable to decrypt]";
+      }
+    }
     const auto keys = conversationKeys_.constFind(conversationId);
     const bool knownVersion =
         chatMessage.encryptionVersion == network::kTextMessageVersion ||
