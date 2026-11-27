@@ -130,6 +130,14 @@ QNetworkReply* HttpClient::getPeerKey(const QString& jwt, const QString& convers
   return networkManager_.get(request);
 }
 
+QNetworkReply* HttpClient::getPeerKeys(const QString& jwt, const QString& conversationId) {
+  QUrl url = baseUrl_;
+  url.setPath("/messaging/conversations/" + conversationId + "/peer-keys");
+  QNetworkRequest request(url);
+  request.setRawHeader("Authorization", "Bearer " + jwt.toUtf8());
+  return networkManager_.get(request);
+}
+
 // ── File API ────────────────────────────────────────────────────────────────
 
 namespace {

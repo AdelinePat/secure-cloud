@@ -136,20 +136,24 @@ http::response<http::string_body> HttpRouter::route(
       target.size() > conversationsPath.size() + messagesSuffix.size() + 1;
 
   const bool isIdentityRoute = target == "/messaging/identity-key";
-  const bool isPeerRoute = target.starts_with(conversationsPath + "/") &&
-                           target.ends_with("/peer-key");
+  const bool isPeerRoute =
+      target.starts_with(conversationsPath + "/") &&
+      (target.ends_with("/peer-key") || target.ends_with("/peer-keys"));
   if (isConversationRoute || isMessageRoute || isIdentityRoute || isPeerRoute) {
-    const bool allowedMethod = isIdentityRoute ? request.method() == http::verb::put :
-        isPeerRoute ? request.method() == http::verb::get :
-        (request.method() == http::verb::post || request.method() == http::verb::get);
+    const bool allowedMethod =
+        isIdentityRoute ? request.method() == http::verb::put
+        : isPeerRoute   ? request.method() == http::verb::get
+                        : (request.method() == http::verb::post ||
+                           request.method() == http::verb::get);
 
     if (!allowedMethod) {
       http::response<http::string_body> response{
           http::status::method_not_allowed, request.version()};
 
       response.set(http::field::content_type, "application/json");
-      response.set(http::field::allow,
-                   isIdentityRoute ? "PUT" : isPeerRoute ? "GET" : "GET, POST");
+      response.set(http::field::allow, isIdentityRoute ? "PUT"
+                                       : isPeerRoute   ? "GET"
+                                                       : "GET, POST");
       response.body() = R"({"error":"METHOD_NOT_ALLOWED"})";
       response.prepare_payload();
 

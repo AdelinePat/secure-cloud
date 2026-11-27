@@ -86,7 +86,7 @@ def run(project):
 
         alice, alice_id = seed_and_login(project, port, "alice")
         bob, bob_id = seed_and_login(project, port, "bob")
-        charlie, _ = seed_and_login(project, port, "charlie")
+        charlie, charlie_id = seed_and_login(project, port, "charlie")
 
         conversations = "/messaging/conversations"
         identity = "/messaging/identity-key"
@@ -98,15 +98,41 @@ def run(project):
                               "participants": ["bob_test"]})
         messages = f"{conversations}/{group['id']}/messages"
         peer = f"{conversations}/{group['id']}/peer-key"
+
+
         request(port, "GET", messages, 403, token=charlie)
         request(port, "POST", messages, 403, token=charlie, data={})
         request(port, "GET", peer, 403, token=charlie)
+        request(port, "GET", f"{conversations}/{group['id']}/peer-keys",
+                403, token=charlie)
         for token in (alice, bob):
             entries = request(port, "GET", conversations, 200, token=token)
             check([entry["id"] for entry in entries] == [group["id"]],
                   "Missing conversation for participant")
         check(request(port, "GET", conversations, 200, token=charlie) == [],
               "Conversation exposed to a non-participant")
+
+        three_person_group = request(
+        port, "POST", conversations, 201, token=alice,
+        data={"type": "group", "name": "Three-person group",
+          "participants": ["bob_test", "charlie_test"]},
+        )
+        group_peer_keys = f"{conversations}/{three_person_group['id']}/peer-keys"
+        request(port, "GET", group_peer_keys, 409, token=alice)
+        bob_key = encoded_random(32)
+        request(port, "PUT", identity, 200, token=bob,
+        data={"public_key": bob_key})
+        charlie_key = encoded_random(32)
+        request(port, "PUT", identity, 200, token=charlie,
+        data={"public_key": charlie_key})
+
+        peers = request(port, "GET", group_peer_keys, 200, token=alice)["peers"]
+        keys_by_user = {peer["user_id"]: peer["public_key"] for peer in peers}
+
+        check(len(peers) == 2 and keys_by_user == {
+            bob_id: bob_key,
+            charlie_id: charlie_key,
+        }, "Incorrect peer keys for three-person group")
 
         message_id = str(uuid.uuid4())
         request(port, "POST", messages, 201, token=alice,

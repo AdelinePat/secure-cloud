@@ -2,7 +2,6 @@
 
 #include <QHash>
 #include <QLabel>
-#include <optional>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
@@ -11,6 +10,7 @@
 #include <QStringList>
 #include <QTextBrowser>
 #include <QTimer>
+#include <optional>
 
 #include "crypto/CryptoTypes.hpp"
 #include "network/ConversationService.hpp"
@@ -82,9 +82,13 @@ class MainWindow : public QMainWindow {
   QPushButton* createConversationButton_;
   QString currentConversationId_;
   std::optional<crypto::KeyPair> identityKeyPair_;
-  struct ConversationKeys { QString peerId; crypto::SessionKeys keys; };
+  struct ConversationKeys {
+    QString peerId;
+    crypto::SessionKeys keys;
+  };
   QHash<QString, ConversationKeys> conversationKeys_;
   void loadPeerKey(const QString& conversationId, bool revalidate = false);
+  void loadGroupPeerKeys(const QString& id, quint64 session, quint64 selection);
   void clearConversationKeys(const QString& id);
   void clearCrypto();
   void showPeerTrustDetails(const QString& details);

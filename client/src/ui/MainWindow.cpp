@@ -40,8 +40,9 @@
 
 namespace ui {
 
-MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
-    : QMainWindow(parent), messageService_(httpClient.baseUrl(), this),
+MainWindow::MainWindow(network::HttpClient& httpClient, QWidget* parent)
+    : QMainWindow(parent),
+      messageService_(httpClient.baseUrl(), this),
       conversationService_(httpClient.baseUrl(), this),
       fileService_(
           httpClient.baseUrl(), [this] { return accessToken_; }, this),
@@ -68,7 +69,7 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
   loginButton_ = new QPushButton("Login", loginPage_);
   loginButton_->setObjectName("loginButton");
 
-  QVBoxLayout *loginLayout = new QVBoxLayout(loginPage_);
+  QVBoxLayout* loginLayout = new QVBoxLayout(loginPage_);
   loginLayout->addStretch();
   loginLayout->addWidget(usernameInput_);
   loginLayout->addWidget(passwordInput_);
@@ -89,7 +90,7 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
   createConversationButton_ = new QPushButton("Create conversation", chatPage_);
   createConversationButton_->setObjectName("createConversationButton");
 
-  QHBoxLayout *conversationLayout = new QHBoxLayout();
+  QHBoxLayout* conversationLayout = new QHBoxLayout();
   conversationLayout->addWidget(conversationNameInput_);
   conversationLayout->addWidget(conversationParticipantsInput_);
   conversationLayout->addWidget(createConversationButton_);
@@ -108,10 +109,11 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
 
   attachButton_ = new QPushButton("Attach file", chatPage_);
   attachButton_->setObjectName("attachButton");
-  attachButton_->setToolTip("Encrypt and send a file. Text in the message box "
-                            "is sent as its caption.");
+  attachButton_->setToolTip(
+      "Encrypt and send a file. Text in the message box "
+      "is sent as its caption.");
 
-  QHBoxLayout *inputLayout = new QHBoxLayout();
+  QHBoxLayout* inputLayout = new QHBoxLayout();
   inputLayout->addWidget(messageInput_);
   inputLayout->addWidget(attachButton_);
   inputLayout->addWidget(sendButton_);
@@ -125,7 +127,7 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
       new QPushButton("Refresh conversations", chatPage_);
 
   reloadConversationsButton_->setObjectName("reloadConversationsButton");
-  auto *securityButton = new QPushButton("Security", chatPage_);
+  auto* securityButton = new QPushButton("Security", chatPage_);
   securityButton->setObjectName("securityButton");
   securityDialog_ = new QDialog(this);
   securityDialog_->setObjectName("securityDialog");
@@ -149,11 +151,11 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
                                            Qt::TextSelectableByKeyboard);
   peerTrustLabel_->setWordWrap(true);
 
-  auto *closeSecurity =
+  auto* closeSecurity =
       new QDialogButtonBox(QDialogButtonBox::Close, securityDialog_);
   connect(closeSecurity, &QDialogButtonBox::rejected, securityDialog_,
           &QDialog::reject);
-  auto *securityLayout = new QVBoxLayout(securityDialog_);
+  auto* securityLayout = new QVBoxLayout(securityDialog_);
   securityLayout->addWidget(localFingerprintLabel_);
   securityLayout->addWidget(peerTrustLabel_);
   securityLayout->addStretch();
@@ -165,25 +167,25 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
   securityWarningLabel_->setWordWrap(true);
   securityWarningLabel_->hide();
 
-  auto *sidebar = new QWidget(chatPage_);
-  auto *sidebarLayout = new QVBoxLayout(sidebar);
+  auto* sidebar = new QWidget(chatPage_);
+  auto* sidebarLayout = new QVBoxLayout(sidebar);
   sidebarLayout->addWidget(new QLabel("Conversations", sidebar));
   sidebarLayout->addWidget(conversationList_);
   sidebarLayout->addWidget(reloadConversationsButton_);
-  auto *conversationPanel = new QWidget(chatPage_);
-  auto *panelLayout = new QVBoxLayout(conversationPanel);
-  auto *conversationHeader = new QHBoxLayout();
+  auto* conversationPanel = new QWidget(chatPage_);
+  auto* panelLayout = new QVBoxLayout(conversationPanel);
+  auto* conversationHeader = new QHBoxLayout();
   conversationHeader->addWidget(conversationTitle_, 1);
   conversationHeader->addWidget(securityButton);
   panelLayout->addLayout(conversationHeader);
   panelLayout->addWidget(securityWarningLabel_);
   panelLayout->addWidget(messageView_);
   panelLayout->addLayout(inputLayout);
-  auto *splitter = new QSplitter(chatPage_);
+  auto* splitter = new QSplitter(chatPage_);
   splitter->addWidget(sidebar);
   splitter->addWidget(conversationPanel);
   splitter->setStretchFactor(1, 1);
-  QVBoxLayout *chatLayout = new QVBoxLayout(chatPage_);
+  QVBoxLayout* chatLayout = new QVBoxLayout(chatPage_);
   chatLayout->addLayout(conversationLayout);
   chatLayout->addWidget(splitter);
   setComposerEnabled(false);
@@ -198,7 +200,7 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
 
   connect(
       conversationList_, &QListWidget::currentItemChanged, this,
-      [this](QListWidgetItem *current, QListWidgetItem *) {
+      [this](QListWidgetItem* current, QListWidgetItem*) {
         if (!currentConversationId_.isEmpty()) {
           conversationDrafts_[currentConversationId_] = messageInput_->text();
         }
@@ -266,8 +268,8 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
           &MainWindow::onSendClicked);
 
   connect(&messageService_, &network::MessageService::messageSent, this,
-          [this](const QString &messageId,
-                 const network::dto::SendMessageResult &result) {
+          [this](const QString& messageId,
+                 const network::dto::SendMessageResult& result) {
             // Convert the network result into a UI status
             MessageStatus status = MessageStatusMapper::fromResult(result);
 
@@ -282,7 +284,7 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
 
   connect(
       &conversationService_, &network::ConversationService::conversationCreated,
-      this, [this](const QString &conversationId, const QString &name) {
+      this, [this](const QString& conversationId, const QString& name) {
         createConversationButton_->setEnabled(true);
         conversationNameInput_->setEnabled(true);
         conversationParticipantsInput_->setEnabled(true);
@@ -296,30 +298,29 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
         statusBar()->showMessage("Conversation created: " + name, 5000);
       });
 
-  connect(&conversationService_,
-          &network::ConversationService::conversationCreationFailed, this,
-          [this](const QString &error) {
-            createConversationButton_->setEnabled(true);
-            conversationNameInput_->setEnabled(true);
-            conversationParticipantsInput_->setEnabled(true);
-            if (accessToken_.isEmpty() ||
-                creationSession_ != sessionGeneration_) {
-              return;
-            }
-            statusBar()->showMessage("Conversation creation failed: " + error);
-          });
+  connect(
+      &conversationService_,
+      &network::ConversationService::conversationCreationFailed, this,
+      [this](const QString& error) {
+        createConversationButton_->setEnabled(true);
+        conversationNameInput_->setEnabled(true);
+        conversationParticipantsInput_->setEnabled(true);
+        if (accessToken_.isEmpty() || creationSession_ != sessionGeneration_) {
+          return;
+        }
+        statusBar()->showMessage("Conversation creation failed: " + error);
+      });
 
   connect(
       &conversationService_, &network::ConversationService::conversationsLoaded,
-      this, [this](const QJsonArray &conversations) {
+      this, [this](const QJsonArray& conversations) {
         listingPending_ = false;
         reloadConversationsButton_->setEnabled(true);
         if (accessToken_.isEmpty() || listingSession_ != sessionGeneration_) {
-          if (!accessToken_.isEmpty())
-            loadConversations();
+          if (!accessToken_.isEmpty()) loadConversations();
           return;
         }
-        for (const auto &value : conversations) {
+        for (const auto& value : conversations) {
           const auto conversation = value.toObject();
           addConversation(conversation.value("id").toString(),
                           conversation.value("name").toString(), false);
@@ -336,22 +337,21 @@ MainWindow::MainWindow(network::HttpClient &httpClient, QWidget *parent)
               5000);
         }
       });
-  connect(&conversationService_,
-          &network::ConversationService::conversationsLoadFailed, this,
-          [this](const QString &error) {
-            listingPending_ = false;
-            reloadConversationsButton_->setEnabled(true);
-            if (accessToken_.isEmpty())
-              return;
-            if (listingSession_ != sessionGeneration_) {
-              loadConversations();
-              return;
-            }
-            if (!listingInBackground_) {
-              statusBar()->showMessage("Could not load conversations: " +
-                                       error);
-            }
-          });
+  connect(
+      &conversationService_,
+      &network::ConversationService::conversationsLoadFailed, this,
+      [this](const QString& error) {
+        listingPending_ = false;
+        reloadConversationsButton_->setEnabled(true);
+        if (accessToken_.isEmpty()) return;
+        if (listingSession_ != sessionGeneration_) {
+          loadConversations();
+          return;
+        }
+        if (!listingInBackground_) {
+          statusBar()->showMessage("Could not load conversations: " + error);
+        }
+      });
   connect(loginButton_, &QPushButton::clicked, this,
           &MainWindow::onLoginClicked);
   connect(usernameInput_, &QLineEdit::returnPressed, this,
@@ -375,7 +375,7 @@ void MainWindow::onLoginClicked() {
 
   loginButton_->setEnabled(false);
 
-  QNetworkReply *reply = httpClient_.login(username, password);
+  QNetworkReply* reply = httpClient_.login(username, password);
 
   connect(
       reply, &QNetworkReply::finished, this,
@@ -467,7 +467,7 @@ void MainWindow::onLoginClicked() {
             identityKeyPair_ = crypto::KeyManager::generateKeyPair();
             crypto::IdentityKeyStore::save(userId, *identityKeyPair_, password);
           }
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
           qWarning() << "Identity initialization failed:" << e.what();
           resetConversations();
           accessToken_.clear();
@@ -478,14 +478,14 @@ void MainWindow::onLoginClicked() {
                                "login password and local identity file.");
           return;
         }
-        const auto &pk = identityKeyPair_->publicKey;
+        const auto& pk = identityKeyPair_->publicKey;
         localFingerprintLabel_->setText(
             "Local SHA-256 fingerprint: " +
             crypto::PeerTrustStore::fingerprint(pk));
         const QString encoded = QString::fromLatin1(
-            QByteArray(reinterpret_cast<const char *>(pk.data()), pk.size())
+            QByteArray(reinterpret_cast<const char*>(pk.data()), pk.size())
                 .toBase64());
-        auto *publication = httpClient_.publishIdentity(accessToken_, encoded);
+        auto* publication = httpClient_.publishIdentity(accessToken_, encoded);
         connect(
             publication, &QNetworkReply::finished, this,
             [this, publication, username]() {
@@ -527,7 +527,7 @@ void MainWindow::refreshAccessToken() {
 
   refreshTimer_->stop();
 
-  QNetworkReply *reply = httpClient_.refreshToken(refreshToken_);
+  QNetworkReply* reply = httpClient_.refreshToken(refreshToken_);
 
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const int status =
@@ -635,9 +635,9 @@ void MainWindow::resetConversations() {
   statusBar()->clearMessage();
 }
 
-void MainWindow::addConversation(const QString &id, const QString &name,
+void MainWindow::addConversation(const QString& id, const QString& name,
                                  bool select) {
-  QListWidgetItem *item = nullptr;
+  QListWidgetItem* item = nullptr;
   for (int row = 0; row < conversationList_->count(); ++row) {
     if (conversationList_->item(row)->data(Qt::UserRole).toString() == id) {
       item = conversationList_->item(row);
@@ -650,15 +650,13 @@ void MainWindow::addConversation(const QString &id, const QString &name,
   }
   item->setText(name.isEmpty() ? "Unnamed conversation" : name);
   item->setToolTip(id);
-  if (select)
-    conversationList_->setCurrentItem(item);
+  if (select) conversationList_->setCurrentItem(item);
   if (item == conversationList_->currentItem())
     conversationTitle_->setText(item->text());
 }
 
 void MainWindow::loadConversations(bool background) {
-  if (accessToken_.isEmpty() || listingPending_)
-    return;
+  if (accessToken_.isEmpty() || listingPending_) return;
   listingPending_ = true;
   listingInBackground_ = background;
   listingSession_ = sessionGeneration_;
@@ -685,7 +683,7 @@ void MainWindow::onCreateConversationClicked() {
 
   const QString input = conversationParticipantsInput_->text();
 
-  for (const QString &username : input.split(',', Qt::SkipEmptyParts)) {
+  for (const QString& username : input.split(',', Qt::SkipEmptyParts)) {
     const QString trimmed = username.trimmed();
 
     if (!trimmed.isEmpty() && !participants.contains(trimmed)) {
@@ -725,7 +723,7 @@ void MainWindow::onSendClicked() {
                 network::kTextMessageVersion);
 }
 
-void MainWindow::sendEncrypted(const QString &conversationId,
+void MainWindow::sendEncrypted(const QString& conversationId,
                                ChatMessage chatMessage, QByteArray plaintext,
                                int encryptionVersion) {
   // Generate a unique identifier for the message
@@ -767,7 +765,7 @@ void MainWindow::sendEncrypted(const QString &conversationId,
     // Send the encrypted message asynchronously through the Gateway
     messageService_.sendMessage(conversationId, accessToken_, request);
 
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     sodium_memzero(plaintext.data(), plaintext.size());
     // Update the message status to indicate failure
     updateMessageStatus(messageId, MessageStatus::Failed);
@@ -787,8 +785,7 @@ void MainWindow::onAttachClicked() {
     return;
   }
   const QString path = QFileDialog::getOpenFileName(this, "Send a file");
-  if (path.isEmpty())
-    return;
+  if (path.isEmpty()) return;
 
   // Text typed in the message box goes with the file as its caption.
   const QString caption = messageInput_->text().trimmed();
@@ -800,13 +797,11 @@ void MainWindow::onAttachClicked() {
   statusBar()->showMessage(transferLabels_.value(transferId) + "...");
 }
 
-void MainWindow::onMessageLinkClicked(const QUrl &url) {
-  if (url.scheme() != "securechat-file" || accessToken_.isEmpty())
-    return;
+void MainWindow::onMessageLinkClicked(const QUrl& url) {
+  if (url.scheme() != "securechat-file" || accessToken_.isEmpty()) return;
   const auto message = messages_.constFind(url.path());
-  if (message == messages_.cend() || !message->file)
-    return;
-  const network::FileMessage &file = *message->file;
+  if (message == messages_.cend() || !message->file) return;
+  const network::FileMessage& file = *message->file;
 
   // The name comes from the sender: strip any path before offering it.
   const QString name = network::safeFileName(file.name);
@@ -814,8 +809,7 @@ void MainWindow::onMessageLinkClicked(const QUrl &url) {
       QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
   const QString path = QFileDialog::getSaveFileName(
       this, "Save file", QDir(directory).filePath(name));
-  if (path.isEmpty())
-    return;
+  if (path.isEmpty()) return;
 
   const QString transferId = fileService_.download(file, path);
   transferLabels_.insert(transferId, "Downloading " + name);
@@ -824,19 +818,17 @@ void MainWindow::onMessageLinkClicked(const QUrl &url) {
 
 void MainWindow::connectFileTransfers() {
   connect(&fileService_, &network::FileService::progress, this,
-          [this](const QString &id, qint64 done, qint64 total) {
-            if (!transferLabels_.contains(id))
-              return;
+          [this](const QString& id, qint64 done, qint64 total) {
+            if (!transferLabels_.contains(id)) return;
             const qint64 percent = total > 0 ? done * 100 / total : 100;
             statusBar()->showMessage(
                 QString("%1: %2%").arg(transferLabels_.value(id)).arg(percent));
           });
 
   connect(&fileService_, &network::FileService::uploadFinished, this,
-          [this](const QString &id, const QString &conversationId,
-                 const network::FileMessage &file) {
-            if (!transferLabels_.remove(id))
-              return;
+          [this](const QString& id, const QString& conversationId,
+                 const network::FileMessage& file) {
+            if (!transferLabels_.remove(id)) return;
             if (!conversationKeys_.contains(conversationId)) {
               // Keys are cleared while the peer identity is re-checked.
               statusBar()->showMessage(
@@ -854,17 +846,15 @@ void MainWindow::connectFileTransfers() {
           });
 
   connect(&fileService_, &network::FileService::downloadFinished, this,
-          [this](const QString &id, const QString &path) {
-            if (!transferLabels_.remove(id))
-              return;
+          [this](const QString& id, const QString& path) {
+            if (!transferLabels_.remove(id)) return;
             statusBar()->showMessage("Saved " + path, 10000);
           });
 
   connect(&fileService_, &network::FileService::transferFailed, this,
-          [this](const QString &id, const QString &error) {
+          [this](const QString& id, const QString& error) {
             const QString label = transferLabels_.take(id);
-            if (label.isEmpty())
-              return;
+            if (label.isEmpty()) return;
             qWarning() << label << "failed:" << error;
             statusBar()->showMessage(label + " failed: " + error);
           });
@@ -875,12 +865,12 @@ void MainWindow::clearCrypto() {
     sodium_memzero(identityKeyPair_->privateKey.data(),
                    identityKeyPair_->privateKey.size());
   identityKeyPair_.reset();
-  for (auto &entry : conversationKeys_)
+  for (auto& entry : conversationKeys_)
     sodium_memzero(&entry.keys, sizeof(entry.keys));
   conversationKeys_.clear();
 }
 
-void MainWindow::clearConversationKeys(const QString &id) {
+void MainWindow::clearConversationKeys(const QString& id) {
   auto entry = conversationKeys_.find(id);
   if (entry != conversationKeys_.end()) {
     sodium_memzero(&entry->keys, sizeof(entry->keys));
@@ -888,7 +878,7 @@ void MainWindow::clearConversationKeys(const QString &id) {
   }
 }
 
-void MainWindow::showPeerTrustDetails(const QString &details) {
+void MainWindow::showPeerTrustDetails(const QString& details) {
   peerTrustLabel_->setText(
       details.isEmpty()
           ? QString("Select a conversation to check peer identity.")
@@ -899,7 +889,7 @@ void MainWindow::showPeerTrustDetails(const QString &details) {
   securityWarningLabel_->setVisible(warning);
 }
 
-void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
+void MainWindow::loadPeerKey(const QString& id, bool revalidate) {
   if (!identityKeyPair_ || accessToken_.isEmpty() || id.isEmpty() ||
       id != currentConversationId_ || (peerKeyPending_ && !revalidate)) {
     return;
@@ -915,7 +905,7 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
   }
   const auto session = sessionGeneration_;
   const auto selection = selectionGeneration_;
-  auto *reply = httpClient_.getPeerKey(accessToken_, id);
+  auto* reply = httpClient_.getPeerKey(accessToken_, id);
   connect(
       reply, &QNetworkReply::finished, this,
       [this, reply, id, session, selection]() {
@@ -924,9 +914,23 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
           return;
         peerKeyPending_ = false;
         try {
+          const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+          const int httpStatus =
+              reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                  .toInt();
+
+          if (httpStatus == 409 &&
+              obj.value("error").toString() == "TWO_PARTICIPANTS_REQUIRED") {
+            loadGroupPeerKeys(id, session, selection);
+            return;
+          }
+
+          if (reply->error() != QNetworkReply::NoError) {
+            throw std::runtime_error("Peer key unavailable");
+          }
           if (reply->error() != QNetworkReply::NoError)
             throw std::runtime_error("Peer key unavailable");
-          const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+
           const QUuid peerUuid(obj.value("user_id").toString());
           const auto peer = peerUuid.toString(QUuid::WithoutBraces);
           const auto bytes = QByteArray::fromBase64(
@@ -945,9 +949,10 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
                                        ? "conversation peer changed"
                                        : "peer key changed";
             const auto warning =
-                QString("E2EE blocked: %1. Verify the peer through a separate "
-                        "channel.\n"
-                        "Expected: %2\nSHA-256: %3\nPresented: %4\nSHA-256: %5")
+                QString(
+                    "E2EE blocked: %1. Verify the peer through a separate "
+                    "channel.\n"
+                    "Expected: %2\nSHA-256: %3\nPresented: %4\nSHA-256: %5")
                     .arg(reason, trust.expectedPeer, trust.expectedFingerprint,
                          peer, trust.presentedFingerprint);
             peerTrustDetails_.insert(id, warning);
@@ -955,7 +960,7 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
             return;
           }
 
-          const auto &own = *identityKeyPair_;
+          const auto& own = *identityKeyPair_;
           // Stable role ordering gives matching transmit and receive keys.
           auto keys = currentUserId_ < peer
                           ? crypto::KeyManager::deriveClientSessionKeys(
@@ -964,11 +969,11 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
                                 own.publicKey, own.privateKey, pk);
           // Bind keys to the conversation to avoid cross-conversation reuse.
           const auto context = id.toUtf8();
-          for (auto *key : {&keys.rx, &keys.tx}) {
+          for (auto* key : {&keys.rx, &keys.tx}) {
             crypto::SessionKey derived{};
             crypto_generichash(
                 derived.data(), derived.size(),
-                reinterpret_cast<const unsigned char *>(context.constData()),
+                reinterpret_cast<const unsigned char*>(context.constData()),
                 context.size(), key->data(), key->size());
             sodium_memzero(key->data(), key->size());
             *key = derived;
@@ -983,7 +988,7 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
           setComposerEnabled(true);
           historyTimer_->start();
           requestActiveHistory();
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
           if (!peerTrustDetails_.value(id).startsWith("E2EE blocked:")) {
             const auto warning =
                 "E2EE unavailable: " + QString::fromUtf8(e.what());
@@ -993,8 +998,47 @@ void MainWindow::loadPeerKey(const QString &id, bool revalidate) {
         }
       });
   QTimer::singleShot(15000, reply, [reply] {
-    if (reply->isRunning())
+    if (reply->isRunning()) reply->abort();
+  });
+}
+
+void MainWindow::loadGroupPeerKeys(const QString& id, quint64 session,
+                                   quint64 selection) {
+  peerKeyPending_ = true;
+  auto* reply = httpClient_.getPeerKeys(accessToken_, id);
+
+  connect(
+      reply, &QNetworkReply::finished, this,
+      [this, reply, session, selection]() {
+        reply->deleteLater();
+
+        if (session != sessionGeneration_ ||
+            selection != selectionGeneration_) {
+          return;
+        }
+
+        peerKeyPending_ = false;
+
+        if (reply->error() != QNetworkReply::NoError) {
+          showPeerTrustDetails("E2EE unavailable: Group peer keys unavailable");
+          return;
+        }
+
+        const auto document = QJsonDocument::fromJson(reply->readAll());
+        const auto peers = document.object().value("peers");
+
+        if (!peers.isArray() || peers.toArray().size() != 2) {
+          showPeerTrustDetails("E2EE unavailable: Invalid group peer list");
+          return;
+        }
+
+        showPeerTrustDetails("Group peer keys received. E2EE setup pending.");
+      });
+
+  QTimer::singleShot(15000, reply, [reply] {
+    if (reply->isRunning()) {
       reply->abort();
+    }
   });
 }
 
@@ -1006,7 +1050,7 @@ void MainWindow::requestActiveHistory() {
   const auto session = sessionGeneration_;
   const auto selection = selectionGeneration_;
   historyPending_ = true;
-  auto *reply = httpClient_.getMessageHistory(id, accessToken_);
+  auto* reply = httpClient_.getMessageHistory(id, accessToken_);
 
   // Keep the slot occupied until this reply finishes, even after a reset.
   connect(
@@ -1030,13 +1074,12 @@ void MainWindow::requestActiveHistory() {
 
   // Release the polling slot even if the server stops responding.
   QTimer::singleShot(15000, reply, [reply]() {
-    if (reply->isRunning())
-      reply->abort();
+    if (reply->isRunning()) reply->abort();
   });
 }
 
-void MainWindow::applyHistory(const QString &conversationId,
-                              const QByteArray &response, int httpStatus) {
+void MainWindow::applyHistory(const QString& conversationId,
+                              const QByteArray& response, int httpStatus) {
   if (httpStatus != 200) {
     qWarning() << "Failed to load history:" << httpStatus;
     return;
@@ -1061,7 +1104,7 @@ void MainWindow::applyHistory(const QString &conversationId,
 
   bool changed = false;
 
-  for (const QJsonValue &value : messages) {
+  for (const QJsonValue& value : messages) {
     if (!value.isObject()) {
       continue;
     }
@@ -1132,7 +1175,7 @@ void MainWindow::applyHistory(const QString &conversationId,
           chatMessage.text = QString::fromUtf8(plain.data(), plain.size());
         }
         sodium_memzero(plain.data(), plain.size());
-      } catch (const std::exception &) {
+      } catch (const std::exception&) {
         chatMessage.text = "[Unable to decrypt]";
       }
     }
@@ -1143,7 +1186,7 @@ void MainWindow::applyHistory(const QString &conversationId,
     messages_.insert(messageId, chatMessage);
   }
 
-  QStringList &order = conversationMessageOrder_[conversationId];
+  QStringList& order = conversationMessageOrder_[conversationId];
 
   // The server returns newest messages first.
   for (int i = messages.size() - 1; i >= 0; --i) {
@@ -1165,24 +1208,24 @@ void MainWindow::applyHistory(const QString &conversationId,
 void MainWindow::refreshMessages() {
   messageView_->clear();
 
-  for (const QString &messageId :
+  for (const QString& messageId :
        conversationMessageOrder_.value(currentConversationId_)) {
-    const ChatMessage &message = messages_.value(messageId);
+    const ChatMessage& message = messages_.value(messageId);
 
     QString statusText;
 
     switch (message.status) {
-    case MessageStatus::Sending:
-      statusText = "Sending...";
-      break;
+      case MessageStatus::Sending:
+        statusText = "Sending...";
+        break;
 
-    case MessageStatus::Sent:
-      statusText = "Sent";
-      break;
+      case MessageStatus::Sent:
+        statusText = "Sent";
+        break;
 
-    case MessageStatus::Failed:
-      statusText = "Failed";
-      break;
+      case MessageStatus::Failed:
+        statusText = "Failed";
+        break;
     }
 
     // Render untrusted plaintext as text, never as HTML.
@@ -1221,7 +1264,7 @@ void MainWindow::refreshMessages() {
   }
 }
 
-void MainWindow::updateMessageStatus(const QString &messageId,
+void MainWindow::updateMessageStatus(const QString& messageId,
                                      MessageStatus status) {
   // Ignore unknown message identifiers
   auto it = messages_.find(messageId);
@@ -1237,4 +1280,4 @@ void MainWindow::updateMessageStatus(const QString &messageId,
   refreshMessages();
 }
 
-} // namespace ui
+}  // namespace ui
