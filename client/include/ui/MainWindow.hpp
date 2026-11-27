@@ -53,7 +53,9 @@ class MainWindow : public QMainWindow {
   quint64 creationSession_ = 0;
   quint64 listingSession_ = 0;
   bool listingPending_ = false;
-  void loadConversations();
+  bool listingInBackground_ = false;
+  QTimer* conversationListTimer_;
+  void loadConversations(bool background = false);
   void addConversation(const QString& id, const QString& name, bool select);
   void resetConversations();
   void requestActiveHistory();

@@ -116,6 +116,8 @@ def run(project):
         history = request(port, "GET", messages, 200, token=bob)["messages"]
         check(len(history) == 1 and history[0]["message_id"] == message_id and
               history[0]["user_id"] == alice_id, "Incorrect sender in message history")
+        check(history[0].get("sender_username") == "alice_test",
+            "Incorrect sender username in message history")
 
         key = {"public_key": encoded_random(32)}
         request(port, "PUT", identity, 200, token=alice, data=key)

@@ -15,6 +15,7 @@ struct ChatMessage {
   MessageStatus status = MessageStatus::Sending;
 
   QString senderId;
+  QString senderUsername;
   QString nonce;
   QString ciphertext;
   QString serverTimestamp;

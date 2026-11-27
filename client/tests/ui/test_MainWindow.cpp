@@ -80,6 +80,8 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QPointer<QTcpSocket> heldHistory;
   QByteArray groupHistory = R"({"messages":[]})";
   int groupHistoryRequests = 0;
+  int peerKeyRequests = 0;
+  bool showInvitedConversation = false;
   const auto respond = [](QTcpSocket* socket, const QByteArray& body,
                           const QByteArray& status) {
     socket->write("HTTP/1.1 " + status +
@@ -126,12 +128,15 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
           }
           body = R"({"status":"ok"})";
         } else if (request.contains("/peer-key HTTP/1.1")) {
+          ++peerKeyRequests;
           const auto key = QByteArray(reinterpret_cast<const char*>(offeredKey.data()),
                                       offeredKey.size()).toBase64();
           body = QJsonDocument(QJsonObject{{"user_id", offeredPeer},
                                          {"public_key", QString::fromLatin1(key)}}).toJson();
         } else if (request.startsWith("GET /messaging/conversations ")) {
-          body = R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"}])";
+          body = showInvitedConversation
+              ? R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"},{"id":"invited","name":"Invitation"}])"
+              : R"([{"id":"a","name":"Team"},{"id":"b","name":"Team"}])";
         } else if (request.startsWith("GET /messaging/conversations/c/messages ")) {
           ++groupHistoryRequests;
           if (holdNextHistory) {
@@ -159,6 +164,9 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   auto* input = window.findChild<QLineEdit*>("messageInput");
   auto* send = window.findChild<QPushButton*>("sendButton");
   auto* name = window.findChild<QLineEdit*>("conversationNameInput");
+  auto* listTimer = window.findChild<QTimer*>("conversationListTimer");
+  QVERIFY(listTimer);
+  QVERIFY(!listTimer->isActive());
   QVERIFY(username && password && list && input && send && name);
   QVERIFY(!send->isEnabled());
   username->setText("test-user");
@@ -368,10 +376,22 @@ void TestMainWindow::loginNavigationAndTokenRotation() {
   QVERIFY(!trustLabel->text().contains("blocked"));
   QVERIFY(!passphrasePromptShown);
 
+  QVERIFY(listTimer->isActive());
+  const auto selectedConversation = list->currentItem();
+  const auto keyRequestsBeforeRefresh = peerKeyRequests;
+  input->setText("draft during background refresh");
+  showInvitedConversation = true;
+  QTRY_COMPARE_WITH_TIMEOUT(list->count(), 4, 6500);
+  QCOMPARE(list->currentItem(), selectedConversation);
+  QCOMPARE(input->text(), QString("draft during background refresh"));
+  QCOMPARE(peerKeyRequests, keyRequestsBeforeRefresh);
+  QVERIFY(historyTimer->isActive());
+
   // A reply from the previous session must not repopulate the cleared chat.
   rejectRefresh = true;
   QVERIFY(QMetaObject::invokeMethod(&window, "refreshAccessToken"));
   QTRY_VERIFY(!historyTimer->isActive());
+  QVERIFY(!listTimer->isActive());
   QCOMPARE(list->count(), 0);
   respond(heldHistory, groupHistory, "200 OK");
   const int requestsAfterReset = groupHistoryRequests;

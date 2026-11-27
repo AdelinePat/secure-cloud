@@ -93,24 +93,26 @@ MessagePage PostgresMessageRepository::history(
   pqxx::result result;
   if (before.has_value()) {
     result = txn.exec_params(
-        "SELECT id, conversation_id, user_id, encode(ciphertext, 'hex') AS "
+        "SELECT m.id, m.conversation_id, m.user_id, encode(m.ciphertext, 'hex') AS "
         "ciphertext_hex, "
-        "       nonce, encryption_version, server_timestamp::text "
-        "FROM messages "
-        "WHERE conversation_id = $1 "
-        "AND (server_timestamp, id) < ($2::timestamptz, $3::uuid) "
-        "AND deleted_at IS NULL "
-        "ORDER BY server_timestamp DESC, id DESC "
+        "       m.nonce, m.encryption_version, m.server_timestamp::text, u.username AS sender_username "
+        "FROM messages m "
+        "LEFT JOIN users u ON u.id = m.user_id "
+        "WHERE m.conversation_id = $1 "
+        "AND (m.server_timestamp, m.id) < ($2::timestamptz, $3::uuid) "
+        "AND m.deleted_at IS NULL "
+        "ORDER BY m.server_timestamp DESC, m.id DESC "
         "LIMIT $4",
         conversationId, *beforeTimestamp, *beforeId, limit);
   } else {
     result = txn.exec_params(
-        "SELECT id, conversation_id, user_id, encode(ciphertext, 'hex') AS "
+        "SELECT m.id, m.conversation_id, m.user_id, encode(m.ciphertext, 'hex') AS "
         "ciphertext_hex, "
-        "       nonce, encryption_version, server_timestamp::text "
-        "FROM messages "
-        "WHERE conversation_id = $1 AND deleted_at IS NULL "
-        "ORDER BY server_timestamp DESC, id DESC LIMIT $2",
+        "       m.nonce, m.encryption_version, m.server_timestamp::text, u.username AS sender_username "
+        "FROM messages m "
+        "LEFT JOIN users u ON u.id = m.user_id "
+        "WHERE m.conversation_id = $1 AND m.deleted_at IS NULL "
+        "ORDER BY m.server_timestamp DESC, m.id DESC LIMIT $2",
         conversationId, limit);
   }
 
@@ -122,6 +124,7 @@ MessagePage PostgresMessageRepository::history(
     m.id = row["id"].as<std::string>();
     m.conversation_id = row["conversation_id"].as<std::string>();
     if (!row["user_id"].is_null()) m.user_id = row["user_id"].as<std::string>();
+    if (!row["sender_username"].is_null()) m.sender_username = row["sender_username"].as<std::string>();
     m.ciphertext = fromHex(row["ciphertext_hex"].as<std::string>());
     m.nonce = row["nonce"].as<std::string>();
     m.encryption_version = row["encryption_version"].as<int16_t>();
